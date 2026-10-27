@@ -19,3 +19,6 @@ appsettings.*.local.json
 ## Frontend (src/web)
 node_modules/
 dist/
+
+## Tài liệu nhóm lưu trên Google Drive, không lưu trong repository code
+/docs/
