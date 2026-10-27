@@ -8,6 +8,8 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\BuildingBlocks\EnglishCenter.BuildingBlocks\EnglishCenter.BuildingBlocks.csproj" />
