@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\EnglishCenter.Modules.MediaNotification.Domain\EnglishCenter.Modules.MediaNotification.Domain.csproj" />
+    <ProjectReference Include="..\EnglishCenter.Modules.MediaNotification.Contracts\EnglishCenter.Modules.MediaNotification.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\EnglishCenter.BuildingBlocks\EnglishCenter.BuildingBlocks.csproj" />
+    
+  </ItemGroup>
+</Project>

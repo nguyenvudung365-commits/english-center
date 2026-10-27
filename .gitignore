@@ -1,0 +1,21 @@
+## .NET / Visual Studio
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+*.suo
+*.userprefs
+[Tt]est[Rr]esult*/
+*.log
+TestResults/
+.idea/
+
+## Cấu hình cục bộ / secret
+appsettings.*.local.json
+.env
+.env.*
+!.env.example
+
+## Frontend (src/web)
+node_modules/
+dist/

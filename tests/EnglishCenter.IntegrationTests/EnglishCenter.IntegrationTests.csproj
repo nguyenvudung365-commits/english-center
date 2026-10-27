@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BuildingBlocks\EnglishCenter.BuildingBlocks\EnglishCenter.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\..\src\Host\EnglishCenter.Api\EnglishCenter.Api.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Enrollment\EnglishCenter.Modules.Enrollment.Contracts\EnglishCenter.Modules.Enrollment.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Finance\EnglishCenter.Modules.Finance.Application\EnglishCenter.Modules.Finance.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Identity\EnglishCenter.Modules.Identity.Infrastructure\EnglishCenter.Modules.Identity.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Academic\EnglishCenter.Modules.Academic.Infrastructure\EnglishCenter.Modules.Academic.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Enrollment\EnglishCenter.Modules.Enrollment.Infrastructure\EnglishCenter.Modules.Enrollment.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Finance\EnglishCenter.Modules.Finance.Infrastructure\EnglishCenter.Modules.Finance.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\MediaNotification\EnglishCenter.Modules.MediaNotification.Infrastructure\EnglishCenter.Modules.MediaNotification.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

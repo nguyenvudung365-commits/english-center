@@ -1,0 +1,14 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- Chặn tham chiếu bắc cầu giữa các project module: mọi tham chiếu phải khai báo tường minh. -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('src\Modules')) Or $(MSBuildProjectDirectory.Contains('src/Modules'))">
+    <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
+  </PropertyGroup>
+</Project>

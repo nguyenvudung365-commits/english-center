@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\EnglishCenter.Modules.Academic.Application\EnglishCenter.Modules.Academic.Application.csproj" />
+    <ProjectReference Include="..\EnglishCenter.Modules.Academic.Domain\EnglishCenter.Modules.Academic.Domain.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\EnglishCenter.BuildingBlocks\EnglishCenter.BuildingBlocks.csproj" />
+  </ItemGroup>
+</Project>

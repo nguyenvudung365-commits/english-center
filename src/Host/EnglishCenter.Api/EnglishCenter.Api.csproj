@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\BuildingBlocks\EnglishCenter.BuildingBlocks\EnglishCenter.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\..\Modules\Identity\EnglishCenter.Modules.Identity.Api\EnglishCenter.Modules.Identity.Api.csproj" />
+    <ProjectReference Include="..\..\Modules\Academic\EnglishCenter.Modules.Academic.Api\EnglishCenter.Modules.Academic.Api.csproj" />
+    <ProjectReference Include="..\..\Modules\Enrollment\EnglishCenter.Modules.Enrollment.Api\EnglishCenter.Modules.Enrollment.Api.csproj" />
+    <ProjectReference Include="..\..\Modules\Finance\EnglishCenter.Modules.Finance.Api\EnglishCenter.Modules.Finance.Api.csproj" />
+    <ProjectReference Include="..\..\Modules\MediaNotification\EnglishCenter.Modules.MediaNotification.Api\EnglishCenter.Modules.MediaNotification.Api.csproj" />
+  </ItemGroup>
+</Project>

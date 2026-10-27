@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\EnglishCenter.Modules.MediaNotification.Application\EnglishCenter.Modules.MediaNotification.Application.csproj" />
+    <ProjectReference Include="..\EnglishCenter.Modules.MediaNotification.Infrastructure\EnglishCenter.Modules.MediaNotification.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\EnglishCenter.BuildingBlocks\EnglishCenter.BuildingBlocks.csproj" />
+  </ItemGroup>
+</Project>
