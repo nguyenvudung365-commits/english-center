@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
@@ -6,8 +7,12 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using EnglishCenter.BuildingBlocks.EventBus;
 using EnglishCenter.BuildingBlocks.Security;
+using EnglishCenter.Modules.Academic.Application;
+using EnglishCenter.Modules.Academic.Application.Abstractions;
 using EnglishCenter.Modules.Academic.Application.Classes;
 using EnglishCenter.Modules.Academic.Contracts.IntegrationEvents;
+using EnglishCenter.Modules.Academic.Domain.Classes;
+using EnglishCenter.Modules.Academic.Domain.Teachers;
 using EnglishCenter.Modules.Academic.Infrastructure.Persistence;
 using EnglishCenter.Modules.Identity.Application.Authentication;
 using EnglishCenter.Modules.Identity.Domain.Users;
@@ -16,11 +21,14 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
+using SQLitePCL;
 using Xunit;
 
 namespace EnglishCenter.IntegrationTests;
@@ -115,6 +123,44 @@ public sealed class AcademicClassTests : IAsyncLifetime
         Assert.Single(_factory.ClassCreated.Events);
     }
 
+    [Fact]
+    public async Task SaveAsync_DuplicateClassCodeRejectedBySqlite_Returns409Failure()
+    {
+        // Hai request cùng mã cùng qua được ClassCodeExistsAsync: chỉ unique index của DB chặn request thứ hai.
+        await SaveClass("IE-RACE");
+        var failure = await Assert.ThrowsAsync<AcademicFailure>(() => SaveClass("IE-RACE"));
+        Assert.Equal(409, failure.Status);
+    }
+
+    [Fact]
+    public async Task SaveAsync_DuplicateTeacherKeyRejectedBySqlite_Returns409Failure()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IAcademicStore>();
+        store.AddTeacher(Teacher.Create(_teacherId, "Nguyen Van Giao", "giao.vien@example.test"));
+        var failure = await Assert.ThrowsAsync<AcademicFailure>(() => store.SaveAsync(CancellationToken.None));
+        Assert.Equal(409, failure.Status);
+    }
+
+    [Fact]
+    public async Task SaveAsync_OtherSqliteConstraint_IsNotMappedToDuplicate()
+    {
+        var error = await Assert.ThrowsAsync<DbUpdateException>(() => SaveClass("IE-NO-COURSE", courseId: Guid.NewGuid()));
+        Assert.Equal(raw.SQLITE_CONSTRAINT_FOREIGNKEY, Assert.IsType<SqliteException>(error.InnerException).SqliteExtendedErrorCode);
+    }
+
+    [Theory]
+    [InlineData(PostgresErrorCodes.UniqueViolation, true)]
+    [InlineData(PostgresErrorCodes.ForeignKeyViolation, false)]
+    public async Task SaveAsync_PostgresError_MapsOnlyUniqueViolationTo409(string sqlState, bool duplicate)
+    {
+        _factory.SaveError.Next = new PostgresException("Simulated PostgreSQL error.", "ERROR", "ERROR", sqlState);
+        if (duplicate)
+            Assert.Equal(409, (await Assert.ThrowsAsync<AcademicFailure>(() => SaveClass("IE-PG"))).Status);
+        else
+            Assert.IsType<PostgresException>((await Assert.ThrowsAsync<DbUpdateException>(() => SaveClass("IE-PG"))).InnerException);
+    }
+
     [Theory]
     [InlineData("endDate", "2026-11-02", "EndDate")]
     [InlineData("endDate", "2026-10-01", "EndDate")]
@@ -189,6 +235,16 @@ public sealed class AcademicClassTests : IAsyncLifetime
     private CreateClassRequest Valid(string code = "IE-2611-A") => new(code, "IELTS Foundation K1", _courseId, "Main",
         new DateOnly(2026, 11, 2), new DateOnly(2027, 1, 30), 20, 4_500_000m, _teacherId);
 
+    // Gọi thẳng IAcademicStore, bỏ qua bước kiểm tra của ClassService để chạm tới ràng buộc trong DB.
+    private async Task SaveClass(string code, Guid? courseId = null)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IAcademicStore>();
+        store.AddClass(Class.Create(code, "IELTS Foundation K1", courseId ?? _courseId, ClassType.Main,
+            new DateOnly(2026, 11, 2), new DateOnly(2027, 1, 30), 20, 4_500_000m, _teacherId, DateTimeOffset.UtcNow));
+        await store.SaveAsync(CancellationToken.None);
+    }
+
     private Dictionary<string, JsonElement> ValidJson() =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(Valid(), JsonSerializerOptions.Web))!;
 
@@ -207,6 +263,7 @@ public sealed class AcademicClassTests : IAsyncLifetime
         private readonly SqliteConnection _identity = new("Data Source=:memory:");
         private readonly SqliteConnection _academic = new("Data Source=:memory:");
         public EventRecorder<ClassCreatedIntegrationEvent> ClassCreated { get; } = new();
+        public SaveErrorInterceptor SaveError { get; } = new();
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -226,7 +283,7 @@ public sealed class AcademicClassTests : IAsyncLifetime
                 services.AddDbContext<IdentityDbContext>(o => o.UseSqlite(_identity));
                 services.RemoveAll<DbContextOptions<AcademicDbContext>>();
                 services.RemoveAll<IDbContextOptionsConfiguration<AcademicDbContext>>();
-                services.AddDbContext<AcademicDbContext>(o => o.UseSqlite(_academic));
+                services.AddDbContext<AcademicDbContext>(o => o.UseSqlite(_academic).AddInterceptors(SaveError));
                 services.AddSingleton<IIntegrationEventHandler<ClassCreatedIntegrationEvent>>(ClassCreated);
             });
         }
@@ -244,6 +301,20 @@ public sealed class AcademicClassTests : IAsyncLifetime
         public List<TEvent> Events { get; } = [];
         public Task HandleAsync(TEvent integrationEvent, CancellationToken ct = default)
         { Events.Add(integrationEvent); return Task.CompletedTask; }
+    }
+
+    // Test chỉ chạy SQLite nên giả lập lỗi mà Npgsql ném ra khi lưu để kiểm tra nhánh PostgreSQL.
+    private sealed class SaveErrorInterceptor : SaveChangesInterceptor
+    {
+        public DbException? Next { get; set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (Next is not { } error) return base.SavingChangesAsync(eventData, result, cancellationToken);
+            Next = null;
+            throw new DbUpdateException("Simulated provider error.", error);
+        }
     }
 }
 

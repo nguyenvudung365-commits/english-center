@@ -3,8 +3,10 @@ using EnglishCenter.Modules.Academic.Application.Abstractions;
 using EnglishCenter.Modules.Academic.Domain.Classes;
 using EnglishCenter.Modules.Academic.Domain.Courses;
 using EnglishCenter.Modules.Academic.Domain.Teachers;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using SQLitePCL;
 
 namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence;
 
@@ -24,9 +26,17 @@ internal sealed class AcademicStore(AcademicDbContext db) : IAcademicStore
     public async Task SaveAsync(CancellationToken ct)
     {
         try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
             throw new AcademicFailure(409, "Academic data already exists.");
         }
     }
+
+    // PostgreSQL khi chạy thật, SQLite trong integration test. 23505 gồm cả trùng khóa chính nên SQLite cũng bắt cả hai.
+    private static bool IsUniqueViolation(DbUpdateException ex) => ex.InnerException switch
+    {
+        PostgresException postgres => postgres.SqlState == PostgresErrorCodes.UniqueViolation,
+        SqliteException sqlite => sqlite.SqliteExtendedErrorCode is raw.SQLITE_CONSTRAINT_UNIQUE or raw.SQLITE_CONSTRAINT_PRIMARYKEY,
+        _ => false
+    };
 }

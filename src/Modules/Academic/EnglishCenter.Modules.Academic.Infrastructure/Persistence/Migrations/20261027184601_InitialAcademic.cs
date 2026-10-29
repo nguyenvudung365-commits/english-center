@@ -90,9 +90,9 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                 columns: new[] { "id", "code", "description", "name" },
                 values: new object[,]
                 {
-                    { new Guid("0c1b6a52-3f4e-4d0a-9b7e-1a2f3c4d5e01"), "IELTS-FOUNDATION", "Nền tảng 4 kỹ năng, mục tiêu band 4.0-4.5", "IELTS Foundation" },
-                    { new Guid("0c1b6a52-3f4e-4d0a-9b7e-1a2f3c4d5e02"), "IELTS-INTERMEDIATE", "Mục tiêu band 5.0-5.5", "IELTS Intermediate" },
-                    { new Guid("0c1b6a52-3f4e-4d0a-9b7e-1a2f3c4d5e03"), "IELTS-ADVANCED", "Mục tiêu band 6.5 trở lên", "IELTS Advanced" }
+                    { new Guid("34d802e7-5319-446a-9104-c6ff10cd6a00"), "IELTS-FOUNDATION", "Nền tảng 4 kỹ năng, mục tiêu band 4.0-4.5", "IELTS Foundation" },
+                    { new Guid("1ae06bfd-eed6-476b-b63d-ef71138ee3b0"), "IELTS-INTERMEDIATE", "Mục tiêu band 5.0-5.5", "IELTS Intermediate" },
+                    { new Guid("3dd0ae5a-0547-42dc-b834-9f4b0d502752"), "IELTS-ADVANCED", "Mục tiêu band 6.5 trở lên", "IELTS Advanced" }
                 });
 
             migrationBuilder.CreateIndex(

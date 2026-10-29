@@ -7,9 +7,9 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Configuratio
 internal sealed class CourseConfiguration : IEntityTypeConfiguration<Course>
 {
     // Backlog chưa có story quản lý khóa học; seed danh mục mẫu để tạo lớp (US-07) dùng được ngay.
-    public static readonly Guid IeltsFoundationId = Guid.Parse("0c1b6a52-3f4e-4d0a-9b7e-1a2f3c4d5e01");
-    public static readonly Guid IeltsIntermediateId = Guid.Parse("0c1b6a52-3f4e-4d0a-9b7e-1a2f3c4d5e02");
-    public static readonly Guid IeltsAdvancedId = Guid.Parse("0c1b6a52-3f4e-4d0a-9b7e-1a2f3c4d5e03");
+    public static readonly Guid IeltsFoundationId = Guid.Parse("34d802e7-5319-446a-9104-c6ff10cd6a00");
+    public static readonly Guid IeltsIntermediateId = Guid.Parse("1ae06bfd-eed6-476b-b63d-ef71138ee3b0");
+    public static readonly Guid IeltsAdvancedId = Guid.Parse("3dd0ae5a-0547-42dc-b834-9f4b0d502752");
 
     public void Configure(EntityTypeBuilder<Course> builder)
     {
