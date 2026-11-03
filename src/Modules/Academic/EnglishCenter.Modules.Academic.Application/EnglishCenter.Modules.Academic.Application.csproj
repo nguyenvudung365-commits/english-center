@@ -7,6 +7,6 @@
     <ProjectReference Include="..\EnglishCenter.Modules.Academic.Domain\EnglishCenter.Modules.Academic.Domain.csproj" />
     <ProjectReference Include="..\EnglishCenter.Modules.Academic.Contracts\EnglishCenter.Modules.Academic.Contracts.csproj" />
     <ProjectReference Include="..\..\..\BuildingBlocks\EnglishCenter.BuildingBlocks\EnglishCenter.BuildingBlocks.csproj" />
-    
+    <ProjectReference Include="..\..\Identity\EnglishCenter.Modules.Identity.Contracts\EnglishCenter.Modules.Identity.Contracts.csproj" />
   </ItemGroup>
 </Project>
