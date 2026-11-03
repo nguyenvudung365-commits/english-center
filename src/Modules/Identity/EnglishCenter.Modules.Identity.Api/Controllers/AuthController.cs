@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using EnglishCenter.BuildingBlocks.Security;
 using EnglishCenter.Modules.Identity.Application.Authentication;
 using Microsoft.AspNetCore.Authorization;
@@ -35,7 +34,7 @@ public sealed class AuthController(IdentityService identity) : ControllerBase
         return NoContent();
     }
 
-    private Guid CurrentUserId() => Guid.TryParse(User.FindFirstValue(AuthClaims.Subject), out var id)
+    private Guid CurrentUserId() => User.TryGetUserId(out var id)
         ? id : throw new IdentityFailure(401, "Invalid subject claim.");
 }
 
@@ -43,7 +42,7 @@ public sealed class AuthController(IdentityService identity) : ControllerBase
 [Route("api/identity/users")]
 [Authorize(Roles = Roles.AccountManagers)]
 [IdentityErrors]
-public sealed class UsersController(IdentityService identity) : ControllerBase
+public sealed class UsersController(IdentityService identity, UserSyncService sync) : ControllerBase
 {
     [HttpPost]
     public async Task<IActionResult> Create(CreateUserRequest request, CancellationToken ct)
@@ -51,6 +50,10 @@ public sealed class UsersController(IdentityService identity) : ControllerBase
         var user = await identity.CreateUserAsync(request, ct);
         return StatusCode(201, user);
     }
+
+    [Authorize(Roles = Roles.Admin), HttpPost("republish")]
+    public Task<RepublishUsersResponse> Republish(RepublishUsersRequest request, CancellationToken ct) =>
+        sync.RepublishAsync(request, ct);
 }
 
 public sealed class IdentityErrorsAttribute : ExceptionFilterAttribute
@@ -58,8 +61,13 @@ public sealed class IdentityErrorsAttribute : ExceptionFilterAttribute
     public override void OnException(ExceptionContext context)
     {
         if (context.Exception is not IdentityFailure failure) return;
-        context.Result = new ObjectResult(new ProblemDetails { Status = failure.Status, Title = failure.Message })
-        { StatusCode = failure.Status };
+        ProblemDetails body = failure.Errors is { Count: > 0 } errors
+            ? new ValidationProblemDetails(errors.ToDictionary(x => x.Key, x => x.Value))
+            { Status = failure.Status, Title = failure.Message }
+            : new ProblemDetails { Status = failure.Status, Title = failure.Message };
+        body.Type = $"https://httpstatuses.io/{failure.Status}";
+        body.Instance = context.HttpContext.Request.Path;
+        context.Result = new ObjectResult(body) { StatusCode = failure.Status };
         context.ExceptionHandled = true;
     }
 }

@@ -14,6 +14,12 @@ internal sealed class IdentityStore(IdentityDbContext db) : IIdentityStore
         db.RefreshSessions.SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
     public async Task<IReadOnlyList<RefreshSession>> SessionsAsync(Guid userId, CancellationToken ct) =>
         await db.RefreshSessions.Where(x => x.UserId == userId && x.RevokedAt == null).ToListAsync(ct);
+    public async Task<IReadOnlyList<User>> UsersAsync(string? role, CancellationToken ct)
+    {
+        // Sort client-side: SQLite cannot ORDER BY DateTimeOffset.
+        var users = await db.Users.AsNoTracking().Where(x => role == null || x.Role == role).ToListAsync(ct);
+        return users.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).ToList();
+    }
     public void AddUser(User user) => db.Users.Add(user);
     public void AddSession(RefreshSession session) => db.RefreshSessions.Add(session);
     public async Task SaveAsync(CancellationToken ct)

@@ -179,6 +179,7 @@ Development tự sinh signing key trong bộ nhớ nếu chưa có cấu hình. 
 | `POST` | `/api/identity/auth/logout` | Bearer + refresh token thuộc người dùng |
 | `POST` | `/api/identity/auth/change-password` | Bearer |
 | `POST` | `/api/identity/users` | `Staff` hoặc `Admin` |
+| `POST` | `/api/identity/users/republish` | `Admin` |
 | `POST` | `/api/academic/classes` | `Staff` hoặc `Admin` |
 | `GET` | `/api/academic/classes/{id}` | `Staff` hoặc `Admin` |
 | `GET` | `/api/academic/courses` | `Staff` hoặc `Admin` |
@@ -199,11 +200,15 @@ Endpoint tạo tài khoản chỉ nhận `Student` hoặc `Teacher`, không cấ
 
 Mật khẩu dùng PasswordHasher của ASP.NET Core Identity. Refresh token chỉ lưu dạng hash, thay mới sau mỗi lần refresh; đăng xuất thu hồi phiên gửi lên, đổi mật khẩu thu hồi toàn bộ refresh token. **Access token đã phát vẫn có hiệu lực đến khi hết hạn.** Auth endpoint giới hạn 20 yêu cầu/phút/IP; khi triển khai sau proxy cần cấu hình IP client đúng.
 
+`POST /api/identity/users/republish` (chỉ `Admin`, body `{ "role": "Teacher" }` hoặc `{}`) phát lại `UserRegistered` cho tài khoản đã có để module khác đồng bộ; handler nhận phải idempotent theo `UserId`.
+
+**Dạng lỗi chung:** mọi lỗi trả `application/problem+json`. Dữ liệu sai là `ValidationProblemDetails` có `errors` theo trường; 401/403/404/429/500 là `ProblemDetails` với `status` tương ứng, 500 không lộ stack trace ở cả Production lẫn Development. Chi tiết token, claim, ma trận quyền và quy ước dữ liệu thuộc chủ sở hữu: [docs/api/hop-dong-xac-thuc-va-loi.md](docs/api/hop-dong-xac-thuc-va-loi.md).
+
 ### Tạo lớp Academic
 
 Sau khi khởi tạo cả hai schema, đăng nhập Staff/Admin và thực hiện:
 
-1. Tạo tài khoản `Teacher` qua `/api/identity/users`. Event `UserRegistered` dựng bản sao giáo viên trong Academic; tài khoản tạo từ trước cần được đồng bộ riêng.
+1. Tạo tài khoản `Teacher` qua `/api/identity/users`. Event `UserRegistered` dựng bản sao giáo viên trong Academic; tài khoản tạo từ trước được đồng bộ bằng `POST /api/identity/users/republish`, endpoint này phát lại event cho mọi tài khoản, kể cả admin bootstrap; module nhận tự lọc theo role.
 2. Lấy `courseId` từ `/api/academic/courses` và `teacherId` từ `/api/academic/teachers`.
 3. Gọi `POST /api/academic/classes` với payload:
 
@@ -237,6 +242,14 @@ dotnet test EnglishCenter.sln -c Release
 | IntegrationTests | Host, ping, schema, Identity/Academic qua HTTP và chống ghi nhận trùng EnrollmentId trong recorder Finance |
 
 Auth test dùng SQLite trong bộ nhớ và không yêu cầu PostgreSQL ngoài. Kiểm tra SQL migration không thay thế việc chạy migration, constraint và luồng nghiệp vụ trên PostgreSQL thật.
+
+Kiểm chứng PostgreSQL: đặt biến môi trường `ENGLISHCENTER_TEST_POSTGRES` là chuỗi kết nối tới server PostgreSQL có quyền tạo database; test tự tạo database tạm và xóa khi xong. Chạy bằng:
+
+```bash
+dotnet test tests/EnglishCenter.IntegrationTests --filter IdentityPostgresTests
+```
+
+Trạng thái hiện tại: chưa chạy; 4 test `IdentityPostgresTests` (F1-F4) đang Skipped vì chưa có biến môi trường.
 
 ## Đóng góp
 
