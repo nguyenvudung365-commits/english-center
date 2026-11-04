@@ -23,7 +23,7 @@ English Center hướng tới quản lý toàn bộ luồng vận hành đào t�
 
 Dự án sử dụng **một ứng dụng triển khai, nhiều module nghiệp vụ**. Mỗi module có ranh giới dữ liệu và các tầng riêng, giúp các thành viên phát triển song song mà vẫn giữ khả năng kiểm thử và tích hợp.
 
-> Dự án đang phát triển. Nhánh `develop` đã tích hợp Identity, tạo lớp Academic (US-07) và các kiểm thử luồng Enrollment → Finance. Nhánh `main` hiện giữ phần khung ban đầu; sử dụng `develop` để chạy các chức năng mô tả bên dưới.
+> Dự án đang phát triển. `develop` là nhánh tích hợp; README này mô tả cả nền code hiện có trên `develop` và phần TV1 tuần 3 trong [PR #8](https://github.com/nguyenvudung365-commits/english-center/pull/8). Nếu PR chưa merge, checkout nhánh `feature/tv1-tuan-3-quyen-loi-api` để sử dụng đầy đủ các chức năng tuần 3 bên dưới. Việc có cấu hình CI/CD không đồng nghĩa hệ thống đã được triển khai production.
 
 ## Trạng thái
 
@@ -31,12 +31,13 @@ Dự án sử dụng **một ứng dụng triển khai, nhiều module nghiệp 
 |---|---|
 | Nền tảng | Solution 5 module, Event Bus in-memory, DbContext/schema riêng, Swagger, health endpoint |
 | Identity | Đã tích hợp vào develop: đăng nhập, JWT, refresh token, đăng xuất, đổi mật khẩu, tạo tài khoản và phân quyền |
+| TV1 tuần 3 — PR #8 | Bổ sung `ICurrentUser`, đọc claim an toàn, chuẩn phản hồi lỗi tại Host, API phát lại sự kiện tài khoản và kiểm thử phân quyền/hợp đồng lỗi |
 | Academic | Đã tích hợp US-07: tạo/đọc lớp, danh mục khóa học mẫu, danh sách giáo viên đồng bộ từ `UserRegistered`, validation, phân quyền và event `ClassCreated` |
 | Enrollment → Finance | Đã bổ sung test chuyển dữ liệu sang handler Finance, chống ghi nhận trùng EnrollmentId và publish đồng thời; recorder hiện vẫn là in-memory, chưa phải hóa đơn lưu database |
-| Kiểm thử | Review riêng nhánh US-07: **173 test đạt**; nhánh test TV3: **83 test đạt**. Đây là hai nền code khác nhau, không cộng thành tổng test của develop |
+| Kiểm thử | Bản tích hợp local tại commit `1cddae3`: **255 passed, 0 failed, 4 skipped**; không cộng kết quả review các nhánh cũ |
 | Nghiệp vụ tiếp theo | Lịch học, ghi danh thực tế, hóa đơn bền vững, bài tập, lưu file và thông báo tiếp tục được phát triển |
-| Docker và CI/CD | Gói bàn giao cho TV4 đang chờ kiểm chứng và tích hợp vào repository |
-| PostgreSQL thực tế | Đã có migration Identity và kiểm tra script; chưa xác nhận chạy toàn bộ luồng auth trên PostgreSQL thật |
+| Docker và CI/CD | `develop` đã có Dockerfile multi-stage, Compose, GitHub Actions, Jenkinsfile và script smoke container; xem phạm vi và giới hạn bên dưới |
+| PostgreSQL | Identity/Academic có migration; bốn test Identity PostgreSQL tùy chọn bị bỏ qua trong lần chạy local nêu trên, không tính là đã đạt |
 
 Số liệu kiểm thử trên là kết quả local tại thời điểm bàn giao, không phải trạng thái CI trực tiếp. Repository hiện chưa có bản phát hành production.
 
@@ -97,10 +98,16 @@ Các khối dữ liệu biểu diễn **schema riêng trong PostgreSQL**, không
 │       └── MediaNotification/
 ├── tests/
 │   ├── EnglishCenter.ArchitectureTests/
+│   ├── EnglishCenter.Academic.Tests/
 │   ├── EnglishCenter.BuildingBlocks.Tests/
 │   └── EnglishCenter.IntegrationTests/
 ├── Directory.Build.props
 ├── Directory.Packages.props        # Quản lý phiên bản NuGet tập trung
+├── Dockerfile
+├── compose.yaml                    # API, PostgreSQL 17 và MinIO
+├── Jenkinsfile
+├── .github/workflows/ci.yml
+├── scripts/ci-smoke.sh
 ├── EnglishCenter.sln
 └── global.json                    # Quy định .NET SDK
 ```
@@ -110,7 +117,8 @@ Các khối dữ liệu biểu diễn **schema riêng trong PostgreSQL**, không
 ### Yêu cầu
 
 - Git và **.NET SDK 10.0.400** hoặc phiên bản tương thích theo `global.json`.
-- PostgreSQL để chạy nghiệp vụ Identity với dữ liệu thật.
+- PostgreSQL để chạy nghiệp vụ Identity/Academic với dữ liệu thật.
+- Docker Engine/Desktop và Docker Compose v2 nếu chạy bằng container.
 - EF CLI 10.x nếu quản lý migration bằng dòng lệnh. Khởi tạo qua host không yêu cầu EF CLI.
 
 ### Chạy Swagger và kiểm tra nền tảng
@@ -170,6 +178,49 @@ Development tự sinh signing key trong bộ nhớ nếu chưa có cấu hình. 
 
 </details>
 
+### Chạy bằng Docker Compose
+
+Tại thư mục gốc, sao chép mẫu cấu hình và điền các giá trị local:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Trong `.env`, cấu hình `POSTGRES_PASSWORD`, `JWT_SIGNING_KEY` (ít nhất 32 byte UTF-8), `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`. Nếu cần admin đầu tiên, đặt thêm `BOOTSTRAP_ADMIN_EMAIL` và `BOOTSTRAP_ADMIN_PASSWORD` (8–128 ký tự). Không commit file `.env` hoặc secret thật.
+
+**Lưu ý Academic:** `compose.yaml` hiện chỉ bật migration Identity. Để chạy các API Academic, tạo file override local `compose.academic.local.yaml` (không commit) với nội dung:
+
+```yaml
+services:
+  api:
+    environment:
+      Academic__InitializeDatabase: 'true'
+```
+
+Sau đó chạy toàn bộ stack:
+
+```bash
+docker compose -f compose.yaml -f compose.academic.local.yaml up -d --build
+docker compose -f compose.yaml -f compose.academic.local.yaml ps
+```
+
+- API health: `http://localhost:5080/health`; Compose chạy **Production nên không bật Swagger**.
+- MinIO API: `http://localhost:9000`; console: `http://localhost:9001`. Có container MinIO chưa đồng nghĩa nghiệp vụ upload/presigned URL đã được tích hợp.
+- PostgreSQL chỉ dùng mạng nội bộ Compose; API và MinIO mặc định bind vào `127.0.0.1`. Muốn truy cập từ ngoài cần cấu hình reverse proxy/TLS phù hợp.
+- Dữ liệu nằm trong volume `postgres-data` và `minio-data`. Dừng bằng `docker compose -f compose.yaml -f compose.academic.local.yaml down`; không thêm `--volumes` nếu cần giữ dữ liệu.
+
+### CI/CD và giới hạn kiểm chứng
+
+| Thành phần | Phạm vi cấu hình hiện có |
+|---|---|
+| GitHub Actions | PR vào `main`/`develop`, push vào hai nhánh và chạy thủ công; restore, build Release, test, lưu TRX, sau đó container smoke |
+| `scripts/ci-smoke.sh` | Stack tạm có PostgreSQL và MinIO; kiểm tra health, bootstrap admin, login, tạo Student, logout và refresh token bị thu hồi; dọn riêng stack/volume tạm khi kết thúc |
+| Jenkins | Agent Linux nhãn `dotnet10-docker`; build/test/smoke; build image trên `main`; chỉ deploy khi bật tham số `DEPLOY`, dùng credential file `english-center-deploy-env` |
+
+Smoke script cần Bash, Docker Compose, `curl`, `jq` và `openssl`. Script hiện **chưa kiểm tra luồng Teacher → Academic → tạo/đọc lớp**, cũng chưa bật migration Academic trong Compose gốc. Có Jenkinsfile không chứng minh Jenkins/VPS/Cloudflare đã được cấu hình hoặc deploy thành công. Xem kết quả CI thực tế tại [GitHub Actions](https://github.com/nguyenvudung365-commits/english-center/actions).
+
+Tại commit `1cddae3`, [CI của PR #8](https://github.com/nguyenvudung365-commits/english-center/actions/runs/41798374475) đã hoàn tất thành công cả `build-and-test` và `container-smoke`. Kết quả smoke chỉ xác nhận phạm vi script mô tả ở trên; commit README mới sẽ kích hoạt lượt CI riêng.
+
 ## API
 
 | Method | Endpoint | Quyền |
@@ -202,13 +253,15 @@ Mật khẩu dùng PasswordHasher của ASP.NET Core Identity. Refresh token ch�
 
 `POST /api/identity/users/republish` (chỉ `Admin`, body `{ "role": "Teacher" }` hoặc `{}`) phát lại `UserRegistered` cho tài khoản đã có để module khác đồng bộ; handler nhận phải idempotent theo `UserId`.
 
-**Dạng lỗi chung:** mọi lỗi trả `application/problem+json`. Dữ liệu sai là `ValidationProblemDetails` có `errors` theo trường; 401/403/404/429/500 là `ProblemDetails` với `status` tương ứng, 500 không lộ stack trace ở cả Production lẫn Development. Chi tiết token, claim, ma trận quyền và quy ước dữ liệu thuộc chủ sở hữu: [docs/api/hop-dong-xac-thuc-va-loi.md](docs/api/hop-dong-xac-thuc-va-loi.md).
+**TV1 tuần 3:** `ICurrentUser` trong BuildingBlocks cung cấp `IsAuthenticated`, `UserId`, `Role`, `IsInRole`; Host triển khai bằng HTTP context. Claim `sub` không phải GUID trả `UserId = null`, không tự tạo ID mặc định. Interface này hỗ trợ đọc danh tính, không thay thế kiểm tra role và quyền sở hữu dữ liệu trong từng module.
+
+**Dạng lỗi API:** Host đăng ký Problem Details, exception handler và status-code pages. Dữ liệu validation sai có `errors` theo trường; các trường hợp 401/403/404/429/500 được kiểm thử theo hợp đồng lỗi, phản hồi 500 không lộ stack trace. Đây không phải cơ chế giao dịch hoặc retry liên module. Chi tiết token, claim, ma trận quyền và quy ước dữ liệu thuộc chủ sở hữu: [hợp đồng xác thực và lỗi](docs/api/hop-dong-xac-thuc-va-loi.md).
 
 ### Tạo lớp Academic
 
 Sau khi khởi tạo cả hai schema, đăng nhập Staff/Admin và thực hiện:
 
-1. Tạo tài khoản `Teacher` qua `/api/identity/users`. Event `UserRegistered` dựng bản sao giáo viên trong Academic; tài khoản tạo từ trước được đồng bộ bằng `POST /api/identity/users/republish`, endpoint này phát lại event cho mọi tài khoản, kể cả admin bootstrap; module nhận tự lọc theo role.
+1. Tạo tài khoản `Teacher` qua `/api/identity/users`. Event `UserRegistered` dựng bản sao giáo viên trong Academic. Với tài khoản đã tồn tại, Admin gọi `POST /api/identity/users/republish` với `{ "role": "Teacher" }`; body `{}` phát lại cho mọi role, kể cả admin bootstrap. Module nhận tự lọc role. Số `published` là số tài khoản đã được phát sự kiện, không bảo đảm mọi handler đã lưu thành công; bus chưa có outbox/retry bền vững.
 2. Lấy `courseId` từ `/api/academic/courses` và `teacherId` từ `/api/academic/teachers`.
 3. Gọi `POST /api/academic/classes` với payload:
 
@@ -249,7 +302,17 @@ Kiểm chứng PostgreSQL: đặt biến môi trường `ENGLISHCENTER_TEST_POST
 dotnet test tests/EnglishCenter.IntegrationTests --filter IdentityPostgresTests
 ```
 
-Trạng thái hiện tại: chưa chạy; 4 test `IdentityPostgresTests` (F1-F4) đang Skipped vì chưa có biến môi trường.
+Kết quả local sau khi tích hợp `develop`, tại commit `1cddae3`, bằng `dotnet test EnglishCenter.sln --nologo`:
+
+| Project test | Passed | Skipped | Failed |
+|---|---:|---:|---:|
+| BuildingBlocks.Tests | 32 | 0 | 0 |
+| Academic.Tests | 54 | 0 | 0 |
+| ArchitectureTests | 53 | 0 | 0 |
+| IntegrationTests | 116 | 4 | 0 |
+| **Tổng** | **255** | **4** | **0** |
+
+Bốn test `IdentityPostgresTests` (F1–F4) bị bỏ qua vì chưa cấu hình biến môi trường trong lần chạy này. Kết quả trên là **local, cấu hình Debug mặc định**, không phải bằng chứng CI Release/container smoke hoặc triển khai production đã đạt. Không đặt `ENGLISHCENTER_TEST_POSTGRES` trỏ vào database nghiệp vụ; dùng server kiểm thử riêng vì test tạo/xóa database tạm.
 
 ## Đóng góp
 
@@ -264,7 +327,7 @@ main                         Bản ổn định
 3. Mở Pull Request vào `develop`, mô tả thay đổi, cách kiểm tra và giới hạn còn lại bằng tiếng Việt.
 4. Nhờ thành viên khác review trước khi merge. Cuối sprint tích hợp từ `develop` vào `main`.
 
-Identity, US-07 và test TV3 hiện có trong develop. Tạo nhánh mới từ develop đã cập nhật để dùng đúng contract. CI/CD chưa tích hợp nên kết quả local cần được ghi rõ trong PR. Test TV3 xác minh recorder hiện có, không đánh dấu US-12/US-23 (ghi danh/hóa đơn thực tế) đã hoàn thành.
+Identity, US-07, test TV3 tuần 1–2 và cấu hình CI/CD đã có trên `develop`; phần TV1 tuần 3 được bàn giao qua PR #8. Tạo nhánh từ `develop` đã cập nhật để dùng đúng contract sau khi PR được merge. Ghi riêng kết quả local, CI và kiểm chứng PostgreSQL/container trong PR. Test TV3 xác minh recorder hiện có, không đánh dấu US-12/US-23 (ghi danh/hóa đơn thực tế) đã hoàn thành.
 
 ## Nhóm phát triển
 
