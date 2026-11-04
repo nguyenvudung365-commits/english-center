@@ -127,21 +127,21 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                     b.HasData(
                         new
                         {
-                            Id = new Guid("0c1b6a52-3f4e-4d0a-9b7e-1a2f3c4d5e01"),
+                            Id = new Guid("34d802e7-5319-446a-9104-c6ff10cd6a00"),
                             Code = "IELTS-FOUNDATION",
                             Description = "Nền tảng 4 kỹ năng, mục tiêu band 4.0-4.5",
                             Name = "IELTS Foundation"
                         },
                         new
                         {
-                            Id = new Guid("0c1b6a52-3f4e-4d0a-9b7e-1a2f3c4d5e02"),
+                            Id = new Guid("1ae06bfd-eed6-476b-b63d-ef71138ee3b0"),
                             Code = "IELTS-INTERMEDIATE",
                             Description = "Mục tiêu band 5.0-5.5",
                             Name = "IELTS Intermediate"
                         },
                         new
                         {
-                            Id = new Guid("0c1b6a52-3f4e-4d0a-9b7e-1a2f3c4d5e03"),
+                            Id = new Guid("3dd0ae5a-0547-42dc-b834-9f4b0d502752"),
                             Code = "IELTS-ADVANCED",
                             Description = "Mục tiêu band 6.5 trở lên",
                             Name = "IELTS Advanced"
