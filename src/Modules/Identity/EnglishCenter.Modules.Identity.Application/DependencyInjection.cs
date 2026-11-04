@@ -7,6 +7,7 @@ public static class DependencyInjection
     public static IServiceCollection AddIdentityApplication(this IServiceCollection services)
     {
         services.AddScoped<Authentication.IdentityService>();
+        services.AddScoped<Authentication.UserSyncService>();
         return services;
     }
 }

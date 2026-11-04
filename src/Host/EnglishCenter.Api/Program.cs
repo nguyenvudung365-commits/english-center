@@ -1,4 +1,6 @@
+using EnglishCenter.Api.Security;
 using EnglishCenter.BuildingBlocks.EventBus;
+using EnglishCenter.BuildingBlocks.Security;
 using EnglishCenter.Modules.Academic.Api;
 using EnglishCenter.Modules.Enrollment.Api;
 using EnglishCenter.Modules.Finance.Api;
@@ -11,6 +13,9 @@ var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
 
 builder.Services.AddInMemoryEventBus();
+builder.Services.AddProblemDetails();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUser, HttpCurrentUser>();
 
 builder.Services.AddIdentityModule(configuration);
 builder.Services.AddAcademicModule(configuration);
@@ -51,6 +56,9 @@ builder.Services.AddSwaggerGen(o =>
 });
 
 var app = builder.Build();
+
+app.UseExceptionHandler();
+app.UseStatusCodePages();
 
 if (app.Environment.IsDevelopment())
 {

@@ -15,9 +15,14 @@ public sealed record UserResponse(Guid Id, string Email, string FullName, string
 public sealed record TokenResponse(string AccessToken, DateTimeOffset AccessTokenExpiresAt,
     string RefreshToken, DateTimeOffset RefreshTokenExpiresAt);
 
-public sealed class IdentityFailure(int status, string message) : Exception(message)
+public sealed record RepublishUsersRequest(string? Role);
+public sealed record RepublishUsersResponse(int Published, string? Role);
+
+public sealed class IdentityFailure(int status, string message, IReadOnlyDictionary<string, string[]>? errors = null)
+    : Exception(message)
 {
     public int Status { get; } = status;
+    public IReadOnlyDictionary<string, string[]>? Errors { get; } = errors;
 }
 
 public interface IIdentityStore
@@ -26,6 +31,7 @@ public interface IIdentityStore
     Task<User?> FindUserAsync(Guid id, CancellationToken ct);
     Task<RefreshSession?> FindSessionAsync(string hash, CancellationToken ct);
     Task<IReadOnlyList<RefreshSession>> SessionsAsync(Guid userId, CancellationToken ct);
+    Task<IReadOnlyList<User>> UsersAsync(string? role, CancellationToken ct);
     void AddUser(User user);
     void AddSession(RefreshSession session);
     Task SaveAsync(CancellationToken ct);
