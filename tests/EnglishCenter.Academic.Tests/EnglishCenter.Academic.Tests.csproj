@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BuildingBlocks\EnglishCenter.BuildingBlocks\EnglishCenter.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Academic\EnglishCenter.Modules.Academic.Domain\EnglishCenter.Modules.Academic.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Academic\EnglishCenter.Modules.Academic.Contracts\EnglishCenter.Modules.Academic.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Academic\EnglishCenter.Modules.Academic.Application\EnglishCenter.Modules.Academic.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Identity\EnglishCenter.Modules.Identity.Contracts\EnglishCenter.Modules.Identity.Contracts.csproj" />
+  </ItemGroup>
+</Project>

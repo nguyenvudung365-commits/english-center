@@ -3,6 +3,7 @@ using EnglishCenter.Modules.Academic.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace EnglishCenter.Modules.Academic.Infrastructure;
 
@@ -26,6 +27,9 @@ public static class DependencyInjection
                 npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", AcademicSchema.Name)));
 
         services.AddSingleton<IAcademicModuleInfo, AcademicModuleInfo>();
+        services.AddScoped<IAcademicStore, AcademicStore>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddHostedService<AcademicStartup>();
 
         return services;
     }
