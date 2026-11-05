@@ -3,6 +3,7 @@ using EnglishCenter.Modules.Finance.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace EnglishCenter.Modules.Finance.Infrastructure;
 
@@ -26,7 +27,9 @@ public static class DependencyInjection
                 npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", FinanceSchema.Name)));
 
         services.AddSingleton<IFinanceModuleInfo, FinanceModuleInfo>();
-        services.AddSingleton<IInvoiceCreationRecorder, InMemoryInvoiceCreationRecorder>();
+        services.AddScoped<IInvoiceStore, InvoiceStore>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddHostedService<FinanceStartup>();
         return services;
     }
 }
