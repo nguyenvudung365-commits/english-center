@@ -214,6 +214,247 @@ public sealed class IdentityAuthTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.TooManyRequests, (await _client.PostAsJsonAsync("/api/identity/auth/refresh", new RefreshRequest("unknown"))).StatusCode);
     }
 
+    // ---- Chuẩn lỗi (C1-C4) ----
+
+    private static async Task<System.Text.Json.JsonElement> Json(HttpResponseMessage response) =>
+        System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
+
+    private static System.Text.Json.JsonElement Prop(System.Text.Json.JsonElement e, string name) =>
+        e.EnumerateObject().Single(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)).Value;
+
+    [Fact]
+    public async Task Login_EmptyBody_Returns400ValidationProblemWithFieldErrors()
+    {
+        var response = await _client.PostAsync("/api/identity/auth/login",
+            new StringContent("{}", System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        var body = await Json(response);
+        Assert.Equal(400, Prop(body, "status").GetInt32());
+        var errors = Prop(body, "errors");
+        Assert.True(Prop(errors, "Email").GetArrayLength() >= 1);
+        Assert.True(Prop(errors, "Password").GetArrayLength() >= 1);
+    }
+
+    [Fact]
+    public async Task CreateAccount_InvalidFields_ReturnErrorsPerField()
+    {
+        Authorize(await Login("Staff"));
+        var response = await _client.PostAsJsonAsync("/api/identity/users",
+            new CreateUserRequest("invalid", "User", "short", Roles.Student));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        var errors = Prop(await Json(response), "errors");
+        Assert.True(Prop(errors, "Email").GetArrayLength() >= 1);
+        Assert.True(Prop(errors, "Password").GetArrayLength() >= 1);
+        Assert.Throws<InvalidOperationException>(() => Prop(errors, "FullName"));
+    }
+
+    [Fact]
+    public async Task CreateAccount_AdminRole_Returns400ProblemDetails_AndDuplicateReturns409WithTitle()
+    {
+        Authorize(await Login("Staff"));
+        var escalate = await _client.PostAsJsonAsync("/api/identity/users",
+            new CreateUserRequest("x@example.test", "X", Password, Roles.Admin));
+        Assert.Equal(HttpStatusCode.BadRequest, escalate.StatusCode);
+        var body = await Json(escalate);
+        Assert.Equal(400, Prop(body, "status").GetInt32());
+        Assert.Equal("Only Student or Teacher accounts can be created through this endpoint.", Prop(body, "title").GetString());
+
+        var duplicate = await _client.PostAsJsonAsync("/api/identity/users",
+            new CreateUserRequest("student@example.test", "Dup", Password, Roles.Student));
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        var conflict = await Json(duplicate);
+        Assert.Equal(409, Prop(conflict, "status").GetInt32());
+        Assert.Equal("Email is already registered.", Prop(conflict, "title").GetString());
+    }
+
+    [Fact]
+    public async Task InvalidLogin_KeepsGenericTitle()
+    {
+        var response = await _client.PostAsJsonAsync("/api/identity/auth/login", new LoginRequest("Student@example.test", "incorrect"));
+        Assert.Equal("Invalid credentials or refresh token.", Prop(await Json(response), "title").GetString());
+    }
+
+    [Fact]
+    public async Task Unauthenticated_Returns401WithProblemBody()
+    {
+        var response = await _client.GetAsync("/api/academic/teachers");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(401, Prop(await Json(response), "status").GetInt32());
+    }
+
+    [Fact]
+    public async Task WrongRole_Returns403WithProblemBody()
+    {
+        Authorize(await Login("Student"));
+        var response = await _client.PostAsJsonAsync("/api/identity/users",
+            new CreateUserRequest("n@example.test", "N", Password, Roles.Student));
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(403, Prop(await Json(response), "status").GetInt32());
+    }
+
+    [Fact]
+    public async Task UnknownRoute_Returns404WithProblemBody()
+    {
+        var response = await _client.GetAsync("/api/does-not-exist");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(404, Prop(await Json(response), "status").GetInt32());
+    }
+
+    // ---- Republish (D1-D5) ----
+
+    private const string RepublishUrl = "/api/identity/users/republish";
+
+    [Fact]
+    public async Task Republish_Admin_PublishesEventsForAllUsers_WithoutLeakingSecrets()
+    {
+        Authorize(await Login("Admin"));
+        var response = await _client.PostAsJsonAsync(RepublishUrl, new RepublishUsersRequest(null));
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var raw = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("example.test", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("hash", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("password", raw, StringComparison.OrdinalIgnoreCase);
+        var result = (await response.Content.ReadFromJsonAsync<RepublishUsersResponse>())!;
+        Assert.Equal(4, result.Published);
+        Assert.Null(result.Role);
+        Assert.Equal(4, _factory.Registered.Events.Count);
+        Assert.Equal(new[] { Roles.Admin, Roles.Staff, Roles.Student, Roles.Teacher },
+            _factory.Registered.Events.Select(x => x.Role).OrderBy(x => x).ToArray());
+        Assert.Equal(4, _factory.Registered.Events.Select(x => x.EventId).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task Store_UsersAsync_FiltersByRole_AndReturnsAll()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IIdentityStore>();
+        Assert.Equal(4, (await store.UsersAsync(null, default)).Count);
+        var teachers = await store.UsersAsync(Roles.Teacher, default);
+        Assert.Equal(Roles.Teacher, Assert.Single(teachers).Role);
+    }
+
+    [Fact]
+    public async Task Store_UsersAsync_OrdersByCreatedAtThenId()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IIdentityStore>();
+        var users = await store.UsersAsync(null, default);
+        var expected = users.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).Select(x => x.Id).ToArray();
+        Assert.Equal(expected, users.Select(x => x.Id).ToArray());
+    }
+
+    [Fact]
+    public async Task Republish_EmptyObjectBody_MeansAllRoles()
+    {
+        Authorize(await Login("Admin"));
+        var response = await _client.PostAsync(RepublishUrl, new StringContent("{}", System.Text.Encoding.UTF8, "application/json"));
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        Assert.Equal(4, (await response.Content.ReadFromJsonAsync<RepublishUsersResponse>())!.Published);
+    }
+
+    [Fact]
+    public async Task Republish_RoleFilter_PublishesOnlyThatRole_MatchingStoredUsers()
+    {
+        Authorize(await Login("Admin"));
+        var response = await _client.PostAsJsonAsync(RepublishUrl, new RepublishUsersRequest(Roles.Teacher));
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var result = (await response.Content.ReadFromJsonAsync<RepublishUsersResponse>())!;
+        Assert.Equal(1, result.Published);
+        Assert.Equal(Roles.Teacher, result.Role);
+        var published = Assert.Single(_factory.Registered.Events);
+        Assert.Equal(Roles.Teacher, published.Role);
+        using var scope = _factory.Services.CreateScope();
+        var teacher = await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Users.SingleAsync(x => x.Role == Roles.Teacher);
+        Assert.Equal(teacher.Id, published.UserId);
+        Assert.Equal(teacher.Email, published.Email);
+    }
+
+    [Fact]
+    public async Task Republish_NoUsersOfRole_ReturnsZero()
+    {
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            db.Users.RemoveRange(db.Users.Where(x => x.Role == Roles.Teacher));
+            await db.SaveChangesAsync();
+        }
+        Authorize(await Login("Admin"));
+        var result = (await (await _client.PostAsJsonAsync(RepublishUrl, new RepublishUsersRequest(Roles.Teacher)))
+            .Content.ReadFromJsonAsync<RepublishUsersResponse>())!;
+        Assert.Equal(0, result.Published);
+        Assert.Empty(_factory.Registered.Events);
+    }
+
+    [Theory]
+    [InlineData("Staff")]
+    [InlineData("Teacher")]
+    [InlineData("Student")]
+    public async Task Republish_NonAdmin_Returns403_AndPublishesNothing(string role)
+    {
+        Authorize(await Login(role));
+        var response = await _client.PostAsJsonAsync(RepublishUrl, new RepublishUsersRequest(null));
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(403, Prop(await Json(response), "status").GetInt32());
+        Assert.Empty(_factory.Registered.Events);
+    }
+
+    [Fact]
+    public async Task Republish_Anonymous_Returns401_AndPublishesNothing()
+    {
+        var response = await _client.PostAsJsonAsync(RepublishUrl, new RepublishUsersRequest(null));
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Empty(_factory.Registered.Events);
+    }
+
+    [Theory]
+    [InlineData("Foo")]
+    public async Task Republish_InvalidRole_Returns400WithRoleError(string role)
+    {
+        Authorize(await Login("Admin"));
+        var response = await _client.PostAsJsonAsync(RepublishUrl, new RepublishUsersRequest(role));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        var errors = Prop(await Json(response), "errors");
+        Assert.True(Prop(errors, "Role").GetArrayLength() >= 1);
+        Assert.Empty(_factory.Registered.Events);
+    }
+
+    [Fact]
+    public async Task Republish_StaffTokenIsNotEnough_ButStaffCanStillCreateAccounts()
+    {
+        // Ghi đè quyền cấp action không được làm hỏng quyền cấp lớp của POST /users.
+        Authorize(await Login("Staff"));
+        Assert.Equal(HttpStatusCode.Created, (await _client.PostAsJsonAsync("/api/identity/users",
+            new CreateUserRequest("another@example.test", "A", Password, Roles.Student))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.PostAsJsonAsync(RepublishUrl, new RepublishUsersRequest(null))).StatusCode);
+    }
+
+    [Fact]
+    public void ICurrentUser_IsResolvable_AndAnonymousOutsideRequest()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var current = scope.ServiceProvider.GetRequiredService<ICurrentUser>();
+        Assert.False(current.IsAuthenticated);
+        Assert.Null(current.UserId);
+        Assert.Null(current.Role);
+        Assert.False(current.IsInRole(Roles.Admin));
+    }
+
+    [Fact]
+    public async Task CurrentUser_ChangePassword_AffectsOnlyCallerAccount()
+    {
+        Authorize(await Login("Student"));
+        Assert.Equal(HttpStatusCode.NoContent, (await _client.PostAsJsonAsync("/api/identity/auth/change-password",
+            new ChangePasswordRequest(Password, "New-password-123!"))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _client.PostAsJsonAsync("/api/identity/auth/login",
+            new LoginRequest("Teacher@example.test", Password))).StatusCode);
+    }
+
     private async Task<TokenResponse> Login(string role)
     {
         var response = await _client.PostAsJsonAsync("/api/identity/auth/login", new LoginRequest($"{role}@example.test", Password));

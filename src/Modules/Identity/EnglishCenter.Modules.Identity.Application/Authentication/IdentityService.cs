@@ -107,7 +107,14 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
     {
         var errors = new List<ValidationResult>();
         if (!Validator.TryValidateObject(request, new ValidationContext(request), errors, true))
-            throw new IdentityFailure(400, string.Join(" ", errors.Select(x => x.ErrorMessage)));
+        {
+            var byField = errors
+                .SelectMany(e => (e.MemberNames.Any() ? e.MemberNames : [string.Empty])
+                    .Select(m => (Field: m, Message: e.ErrorMessage ?? "Invalid value.")))
+                .GroupBy(x => x.Field)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.Message).Distinct().ToArray());
+            throw new IdentityFailure(400, "One or more validation errors occurred.", byField);
+        }
     }
 
     private static IdentityFailure InvalidCredentials() => new(401, "Invalid credentials or refresh token.");
