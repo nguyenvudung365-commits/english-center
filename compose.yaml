@@ -10,6 +10,9 @@ services:
       ConnectionStrings__Default: "Host=postgres;Port=5432;Database=english_center;Username=english_center;Password=${POSTGRES_PASSWORD:?Phai cau hinh POSTGRES_PASSWORD}"
       Jwt__SigningKey: ${JWT_SIGNING_KEY:?Phai cau hinh JWT_SIGNING_KEY}
       Identity__InitializeDatabase: 'true'
+      Academic__InitializeDatabase: 'true'
+      Enrollment__InitializeDatabase: 'true'
+      Finance__InitializeDatabase: 'true'
       Identity__BootstrapAdmin__Email: ${BOOTSTRAP_ADMIN_EMAIL:-}
       Identity__BootstrapAdmin__FullName: ${BOOTSTRAP_ADMIN_NAME:-Administrator}
       Identity__BootstrapAdmin__Password: ${BOOTSTRAP_ADMIN_PASSWORD:-}

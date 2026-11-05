@@ -154,6 +154,8 @@ public sealed class IdentityPostgresTests : IAsyncLifetime
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
+            // DI đọc connection string khi đăng ký module, trước callback ConfigureAppConfiguration.
+            builder.UseSetting("ConnectionStrings:Default", connection);
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Default"] = connection,
