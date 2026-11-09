@@ -4,7 +4,7 @@ namespace EnglishCenter.BuildingBlocks.Security;
 public interface ICurrentUser
 {
     bool IsAuthenticated { get; }
-    /// <summary>Null nếu chưa xác thực hoặc claim <c>sub</c> không phải Guid.</summary>
+    /// <summary>Null nếu chưa xác thực hoặc claim <c>sub</c> không phải Guid khác rỗng.</summary>
     Guid? UserId { get; }
     /// <summary>Một trong <see cref="Roles"/>; null nếu không có.</summary>
     string? Role { get; }
