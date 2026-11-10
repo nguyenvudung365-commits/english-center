@@ -173,6 +173,96 @@ public sealed class Tv3Week3Tests : IAsyncLifetime
         Assert.Equal(response.Id, (await db.Enrollments.SingleAsync()).Id);
     }
 
+    [Theory]
+    [InlineData("Staff", HttpStatusCode.Accepted, HttpStatusCode.OK)]
+    [InlineData("Admin", HttpStatusCode.Accepted, HttpStatusCode.OK)]
+    [InlineData("Teacher", HttpStatusCode.Forbidden, HttpStatusCode.Forbidden)]
+    [InlineData("Student", HttpStatusCode.Forbidden, HttpStatusCode.Forbidden)]
+    public async Task AcademicClassReplayAndBackfill_RequireManager(string name, HttpStatusCode replay, HttpStatusCode backfill)
+    {
+        _client.DefaultRequestHeaders.Authorization = null;
+        Assert.Equal(HttpStatusCode.Unauthorized, (await ReplayClass()).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await _client.PostAsync("/api/academic/classes/republish", null)).StatusCode);
+        await Login(name);
+        Assert.Equal(replay, (await ReplayClass()).StatusCode);
+        Assert.Equal(backfill, (await _client.PostAsync("/api/academic/classes/republish", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task AcademicClassReplay_UnknownClass_Returns404()
+    {
+        var response = await _client.PostAsync($"/api/academic/classes/{Guid.NewGuid()}/replay", null);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        using var scope = _factory.Services.CreateScope();
+        Assert.Single(await scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>().Classes.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LegacyAcademicClass_BackfillEnablesEnrollment_AndReplayPreservesOccupiedSeats(bool bulk)
+    {
+        _class = await SeedLegacyClass();
+        Assert.Equal(HttpStatusCode.BadRequest, (await Enroll()).StatusCode);
+        using (var scope = _factory.Services.CreateScope())
+            Assert.False(await scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>().Classes.AnyAsync(x => x.ClassId == _class));
+
+        async Task Replay()
+        {
+            if (!bulk) Assert.Equal(HttpStatusCode.Accepted, (await ReplayClass()).StatusCode);
+            else
+            {
+                var response = await _client.PostAsync("/api/academic/classes/republish", null);
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                Assert.Equal(2, (await response.Content.ReadFromJsonAsync<RepublishClassesResponse>())!.Published);
+            }
+        }
+
+        await Replay();
+        await Replay();
+        var enrolled = await Enroll();
+        Assert.Equal(HttpStatusCode.Created, enrolled.StatusCode);
+        var registration = (await enrolled.Content.ReadFromJsonAsync<EnrollmentResponse>())!;
+        Assert.Equal(_class, (await GetInvoice(registration.Id)).ClassId);
+        await Replay();
+        await Replay();
+        Assert.Equal(HttpStatusCode.Conflict, (await Enroll(_other)).StatusCode);
+
+        using var verify = _factory.Services.CreateScope();
+        var db = verify.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+        var snapshot = await db.Classes.AsNoTracking().SingleAsync(x => x.ClassId == _class);
+        Assert.Equal(2, await db.Classes.CountAsync());
+        Assert.Equal(1, snapshot.CurrentStudents);
+        Assert.Equal(1, snapshot.MaxStudents);
+        Assert.Equal(4_500_000m, snapshot.TuitionFee);
+        Assert.Equal(registration.Id, (await db.Enrollments.SingleAsync()).Id);
+        var academic = verify.ServiceProvider.GetRequiredService<AcademicDbContext>();
+        Assert.Equal(2, await academic.Classes.CountAsync());
+        Assert.Equal(_class, (await academic.ClassStudents.SingleAsync()).ClassId);
+        Assert.Single(await verify.ServiceProvider.GetRequiredService<FinanceDbContext>().Invoices.ToListAsync());
+    }
+
+    [PgFact]
+    public async Task PostgreSql_ConcurrentClassReplays_BackfillOnce_AndPreserveOccupiedSeats()
+    {
+        _class = await SeedLegacyClass();
+        async Task ReplayConcurrently()
+        {
+            var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var requests = Enumerable.Range(0, 8).Select(async _ => { await start.Task; return await ReplayClass(); }).ToArray();
+            start.SetResult();
+            Assert.All(await Task.WhenAll(requests), x => Assert.Equal(HttpStatusCode.Accepted, x.StatusCode));
+        }
+        await ReplayConcurrently();
+        Assert.Equal(HttpStatusCode.Created, (await Enroll()).StatusCode);
+        await ReplayConcurrently();
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+        Assert.Equal(2, await db.Classes.CountAsync());
+        Assert.Equal(1, (await db.Classes.AsNoTracking().SingleAsync(x => x.ClassId == _class)).CurrentStudents);
+        Assert.Single(await db.Enrollments.ToListAsync());
+    }
+
     [Fact]
     public async Task EnrollmentSaveFailure_RollsBackReservedSeat_AndDoesNotPublish()
     {
@@ -264,6 +354,19 @@ public sealed class Tv3Week3Tests : IAsyncLifetime
     }
 
     private EnrollRequest Request(Guid? student = null) => new(student ?? _student, _class, 3, 5, 2);
+    private Task<HttpResponseMessage> ReplayClass() => _client.PostAsync($"/api/academic/classes/{_class}/replay", null);
+    private async Task<Guid> SeedLegacyClass()
+    {
+        // Lớp đã tồn tại trước khi Enrollment nhận sự kiện: chỉ lưu Academic, không phát ClassCreated.
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AcademicDbContext>();
+        var value = EnglishCenter.Modules.Academic.Domain.Classes.Class.Create("LEGACY-" + Guid.NewGuid().ToString("N"),
+            "Legacy class", _course, EnglishCenter.Modules.Academic.Domain.Classes.ClassType.Main,
+            Today.AddDays(-30), Today.AddDays(30), 1, 4_500_000, _teacher, DateTimeOffset.UtcNow.AddDays(-30));
+        db.Classes.Add(value);
+        await db.SaveChangesAsync();
+        return value.Id;
+    }
     private Task<HttpResponseMessage> Enroll(Guid? student = null) => _client.PostAsJsonAsync(Url, Request(student));
     private async Task<InvoiceResponse> GetInvoice(Guid enrollment) =>
         (await _client.GetFromJsonAsync<InvoiceResponse>($"/api/finance/invoices/by-enrollment/{enrollment}"))!;

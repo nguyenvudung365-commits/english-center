@@ -281,6 +281,8 @@ Sau khi khởi tạo cả hai schema, đăng nhập Staff/Admin và thực hiệ
 
 `classType` nhận `Main` hoặc `Supplementary`. Mã lớp được chuẩn hóa và phải duy nhất; ngày kết thúc sau ngày bắt đầu, sĩ số lớn hơn 0, học phí là số nguyên VND từ 0 đến 999.999.999.999. Tạo thành công trả 201 cùng địa chỉ đọc lại và phát `ClassCreated`. Trạng thái lớp suy ra từ ngày theo giờ Việt Nam (UTC+7).
 
+**Đồng bộ lớp cũ sang Enrollment (TV3 tuần 3):** Staff/Admin gọi `POST /api/academic/classes/republish` (không body, 200 với `{ "published": N }`) để phát lại toàn bộ lớp, hoặc `POST /api/academic/classes/{id}/replay` (không body, 202; lớp không tồn tại trả 404) để phát lại một lớp. Chưa đăng nhập trả 401, Student/Teacher trả 403. Academic chỉ đọc schema của mình và phát `ClassCreated`; Enrollment dựng snapshot theo `ClassId`, không tạo trùng và không đặt lại sĩ số đang có. Phản hồi chỉ xác nhận phát sự kiện, cần kiểm tra luồng ghi danh/hóa đơn và log handler để xác nhận đồng bộ. Xem [hướng dẫn backfill và demo tuần 3](TV3_WEEK3.md#backfill-lớp-và-tài-khoản-đã-tồn-tại) để có lệnh PowerShell cụ thể.
+
 ## Kiểm thử
 
 ```bash

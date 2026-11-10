@@ -22,6 +22,7 @@ internal sealed class EnrollmentStore(EnrollmentDbContext db) : IEnrollmentStore
     public async Task AddClassAsync(ClassSnapshot value, CancellationToken ct)
     {
         var existing = await db.Classes.AsNoTracking().SingleOrDefaultAsync(x => x.ClassId == value.ClassId, ct);
+        // Replay chỉ kiểm tra payload gốc; không ghi đè snapshot hay đặt lại CurrentStudents.
         if (existing is not null) { CheckSnapshot(existing, value); return; }
         db.Classes.Add(value);
         try { await db.SaveChangesAsync(ct); }
