@@ -3,9 +3,15 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using EnglishCenter.Modules.Identity.Application.Authentication;
+using EnglishCenter.Modules.Identity.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using Xunit;
 
@@ -55,7 +61,19 @@ public sealed class IdentityPostgresTests : IAsyncLifetime
         await command.ExecuteNonQueryAsync();
     }
 
-    private WebApplicationFactory<Program> NewHost() => new PgFactory(DbConnection);
+    private WebApplicationFactory<Program> NewHost()
+    {
+        var host = new PgFactory(DbConnection);
+        using var scope = host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var expected = new NpgsqlConnectionStringBuilder(DbConnection);
+        var actual = new NpgsqlConnectionStringBuilder(db.Database.GetConnectionString());
+        Assert.Equal("Npgsql.EntityFrameworkCore.PostgreSQL", db.Database.ProviderName);
+        Assert.Equal(expected.Host, actual.Host);
+        Assert.Equal(expected.Port, actual.Port);
+        Assert.Equal(expected.Database, actual.Database);
+        return host;
+    }
 
     private static async Task<TokenResponse> Login(HttpClient client, string email, string password)
     {
@@ -165,6 +183,15 @@ public sealed class IdentityPostgresTests : IAsyncLifetime
                 ["Identity:BootstrapAdmin:FullName"] = "Admin PG",
                 ["Identity:BootstrapAdmin:Password"] = AdminPassword
             }));
+            builder.ConfigureTestServices(services =>
+            {
+                // Infrastructure captures its connection before ConfigureAppConfiguration runs.
+                // Remove the captured options callback as well as the cached options registration.
+                services.RemoveAll<DbContextOptions<IdentityDbContext>>();
+                services.RemoveAll<IDbContextOptionsConfiguration<IdentityDbContext>>();
+                services.AddDbContext<IdentityDbContext>(options => options.UseNpgsql(connection,
+                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", IdentitySchema.Name)));
+            });
         }
     }
 }

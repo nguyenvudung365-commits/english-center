@@ -8,7 +8,8 @@ public static class ClaimsPrincipalExtensions
     {
         userId = Guid.Empty;
         return principal.Identity?.IsAuthenticated == true
-            && Guid.TryParse(principal.FindFirst(AuthClaims.Subject)?.Value, out userId);
+            && Guid.TryParse(principal.FindFirst(AuthClaims.Subject)?.Value, out userId)
+            && userId != Guid.Empty;
     }
 
     public static string? GetRole(this ClaimsPrincipal principal) => principal.FindFirst(AuthClaims.Role)?.Value;

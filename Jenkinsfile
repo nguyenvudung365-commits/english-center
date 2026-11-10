@@ -30,6 +30,14 @@ pipeline {
         stage('Kiểm tra container và PostgreSQL') {
             steps { sh 'bash scripts/ci-smoke.sh' }
         }
+        stage('Build frontend') {
+            steps {
+                script {
+                    env.IMAGE_TAG = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                }
+                sh 'docker build -t "english-center-web:$IMAGE_TAG" frontend'
+            }
+        }
         stage('Build image bàn giao') {
             when { branch 'main' }
             steps {
@@ -44,8 +52,8 @@ pipeline {
             steps {
                 // Chỉ job main đáng tin cậy được cấp credential này.
                 withCredentials([file(credentialsId: 'english-center-deploy-env', variable: 'DEPLOY_ENV')]) {
-                    sh 'docker compose --env-file "$DEPLOY_ENV" --project-name english-center -f compose.yaml config --quiet'
-                    sh 'docker compose --env-file "$DEPLOY_ENV" --project-name english-center -f compose.yaml up -d --no-build --wait --wait-timeout 180'
+                    sh 'docker compose --env-file "$DEPLOY_ENV" --project-name english-center -f compose.yaml -f compose.web.yaml config --quiet'
+                    sh 'docker compose --env-file "$DEPLOY_ENV" --project-name english-center -f compose.yaml -f compose.web.yaml up -d --no-build --wait --wait-timeout 180'
                 }
             }
         }

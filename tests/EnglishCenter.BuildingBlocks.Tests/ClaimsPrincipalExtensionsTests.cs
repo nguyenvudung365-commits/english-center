@@ -18,6 +18,17 @@ public sealed class ClaimsPrincipalExtensionsTests
     }
 
     [Fact]
+    public void TryGetUserId_AuthenticatedPrincipalWithEmptyGuidSub_ReturnsFalseAndEmptyId()
+    {
+        var principal = Authenticated(new Claim(AuthClaims.Subject, Guid.Empty.ToString()));
+
+        var result = principal.TryGetUserId(out var id);
+
+        Assert.Equal(Guid.Empty, id);
+        Assert.False(result);
+    }
+
+    [Fact]
     public void TryGetUserId_MissingSub_ReturnsFalse()
     {
         Assert.False(Authenticated(new Claim(AuthClaims.Role, Roles.Student)).TryGetUserId(out var id));
