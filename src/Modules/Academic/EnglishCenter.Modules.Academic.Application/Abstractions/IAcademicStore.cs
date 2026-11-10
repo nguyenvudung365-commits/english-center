@@ -8,6 +8,7 @@ public interface IAcademicStore
 {
     Task<bool> ClassCodeExistsAsync(string normalizedCode, CancellationToken ct);
     Task<Class?> FindClassAsync(Guid id, CancellationToken ct);
+    Task<IReadOnlyList<Class>> ClassesAsync(CancellationToken ct);
     Task<Course?> FindCourseAsync(Guid id, CancellationToken ct);
     Task<IReadOnlyList<Course>> CoursesAsync(CancellationToken ct);
     Task<Teacher?> FindTeacherAsync(Guid id, CancellationToken ct);

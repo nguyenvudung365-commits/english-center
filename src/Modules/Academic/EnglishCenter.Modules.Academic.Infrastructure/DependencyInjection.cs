@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using EnglishCenter.Modules.Academic.Application.Classes;
 
 namespace EnglishCenter.Modules.Academic.Infrastructure;
 
@@ -28,6 +29,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IAcademicModuleInfo, AcademicModuleInfo>();
         services.AddScoped<IAcademicStore, AcademicStore>();
+        services.AddScoped<IClassRoster, ClassRoster>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddHostedService<AcademicStartup>();
 

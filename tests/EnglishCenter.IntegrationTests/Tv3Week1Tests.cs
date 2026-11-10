@@ -2,97 +2,67 @@ using EnglishCenter.BuildingBlocks.EventBus;
 using EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents;
 using EnglishCenter.Modules.Finance.Application.Abstractions;
 using EnglishCenter.Modules.Finance.Application.IntegrationEventHandlers;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
+using EnglishCenter.Modules.Finance.Contracts.IntegrationEvents;
+using EnglishCenter.Modules.Finance.Domain.Invoices;
 using Xunit;
 
 namespace EnglishCenter.IntegrationTests;
 
-public class Tv3Week1Tests : IClassFixture<WebApplicationFactory<Program>>
+// Thay kiểm thử recorder mẫu tuần 1 bằng kiểm thử handler hóa đơn thật tuần 3.
+public sealed class Tv3Week1Tests
 {
-    private readonly WebApplicationFactory<Program> _factory;
-
-    public Tv3Week1Tests(WebApplicationFactory<Program> factory) => _factory = factory;
-
     [Theory]
     [InlineData(0)]
     [InlineData(1_500_000)]
-    public async Task FinanceHandler_ForwardsEnrollmentStudentAmountAndCancellation(int tuitionFee)
+    [InlineData(999_999_999_999)]
+    public async Task FinanceHandler_PreservesPayloadAndDueDate(long tuition)
     {
-        var recorder = new CapturingRecorder();
-        var handler = new StudentEnrolledIntegrationEventHandler(
-            recorder, NullLogger<StudentEnrolledIntegrationEventHandler>.Instance);
-        var enrolled = CreateEvent(Guid.NewGuid(), tuitionFee);
+        var store = new CapturingStore();
+        var bus = new CapturingBus();
+        var handler = new StudentEnrolledIntegrationEventHandler(store, bus, TimeProvider.System);
+        var enrolled = new StudentEnrolledIntegrationEvent(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), tuition,
+            new DateTime(2027, 1, 31, 23, 59, 0, DateTimeKind.Utc));
         using var cancellation = new CancellationTokenSource();
-
         await handler.HandleAsync(enrolled, cancellation.Token);
-
-        Assert.Equal(enrolled.EnrollmentId, recorder.EnrollmentId);
-        Assert.Equal(enrolled.StudentId, recorder.StudentId);
-        Assert.Equal(enrolled.TuitionFee, recorder.Amount);
-        Assert.Equal(cancellation.Token, recorder.Token);
-        Assert.Equal(1, recorder.Calls);
+        Assert.Equal(enrolled.EnrollmentId, store.Value!.EnrollmentId);
+        Assert.Equal(enrolled.StudentId, store.Value.StudentId);
+        Assert.Equal(enrolled.ClassId, store.Value.ClassId);
+        Assert.Equal(tuition, store.Value.Amount);
+        Assert.Equal(new DateOnly(2027, 2, 8), store.Value.DueDate);
+        Assert.Equal(cancellation.Token, store.Token);
+        var published = Assert.IsType<InvoiceCreatedIntegrationEvent>(bus.Value);
+        Assert.Equal(store.Value.Id, published.InvoiceId);
     }
 
-    [Fact]
-    public async Task SameEnrollment_WithDifferentEventIds_IsRecordedOnce()
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0.5)]
+    [InlineData(1_000_000_000_000)]
+    public void InvalidAmount_IsRejected(decimal amount) => Assert.Throws<ArgumentException>(() =>
+        Invoice.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), amount, DateTime.UtcNow, DateTime.UtcNow));
+
+    [Theory]
+    [InlineData("2026-12-31T16:59:00Z", "2027-01-07")]
+    [InlineData("2026-12-31T17:00:00Z", "2027-01-08")]
+    [InlineData("2028-02-22T17:00:00Z", "2028-03-01")]
+    public void DueDate_UsesVietnamCalendar(string utc, string expected)
     {
-        var bus = _factory.Services.GetRequiredService<IEventBus>();
-        var recorder = _factory.Services.GetRequiredService<IInvoiceCreationRecorder>();
-        var first = CreateEvent(Guid.NewGuid(), 1_500_000m);
-        var replay = new StudentEnrolledIntegrationEvent(
-            first.EnrollmentId, first.StudentId, first.ClassId, first.TuitionFee, first.EnrolledAtUtc);
-        Assert.NotEqual(first.EventId, replay.EventId);
-
-        await bus.PublishAsync(first);
-        await bus.PublishAsync(replay);
-
-        Assert.Single(recorder.RecordedEnrollmentIds, id => id == first.EnrollmentId);
+        var at = DateTime.Parse(utc, null, System.Globalization.DateTimeStyles.AdjustToUniversal);
+        Assert.Equal(DateOnly.Parse(expected), Invoice.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 0, at, DateTime.UtcNow).DueDate);
     }
 
-    [Fact]
-    public async Task ConcurrentPublishes_ForSameEnrollment_AreRecordedOnce()
+    private sealed class CapturingStore : IInvoiceStore
     {
-        var bus = _factory.Services.GetRequiredService<IEventBus>();
-        var recorder = _factory.Services.GetRequiredService<IInvoiceCreationRecorder>();
-        var first = CreateEvent(Guid.NewGuid(), 1_500_000m);
-        // Release all workers together so the recorder is used from multiple threads.
-        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var publishes = Enumerable.Range(0, 20).Select(_ => Task.Run(async () =>
-        {
-            await start.Task;
-            await bus.PublishAsync(new StudentEnrolledIntegrationEvent(
-                first.EnrollmentId, first.StudentId, first.ClassId, first.TuitionFee, first.EnrolledAtUtc));
-        })).ToArray();
-
-        start.SetResult();
-        await Task.WhenAll(publishes);
-
-        Assert.Single(recorder.RecordedEnrollmentIds, id => id == first.EnrollmentId);
-    }
-
-    private static StudentEnrolledIntegrationEvent CreateEvent(Guid enrollmentId, decimal amount) =>
-        new(enrollmentId, Guid.NewGuid(), Guid.NewGuid(), amount, DateTime.UtcNow);
-
-    private sealed class CapturingRecorder : IInvoiceCreationRecorder
-    {
-        public Guid EnrollmentId { get; private set; }
-        public Guid StudentId { get; private set; }
-        public decimal Amount { get; private set; }
+        public Invoice? Value { get; private set; }
         public CancellationToken Token { get; private set; }
-        public int Calls { get; private set; }
-        public IReadOnlyCollection<Guid> RecordedEnrollmentIds =>
-            Calls == 0 ? Array.Empty<Guid>() : new[] { EnrollmentId };
-
-        public Task RecordAsync(Guid enrollmentId, Guid studentId, decimal amount, CancellationToken ct)
-        {
-            EnrollmentId = enrollmentId;
-            StudentId = studentId;
-            Amount = amount;
-            Token = ct;
-            Calls++;
-            return Task.CompletedTask;
-        }
+        public Task<Invoice> CreateOnceAsync(Invoice invoice, CancellationToken ct)
+        { Value = invoice; Token = ct; return Task.FromResult(invoice); }
+        public Task<Invoice?> FindByEnrollmentAsync(Guid id, CancellationToken ct) => Task.FromResult(Value);
+    }
+    private sealed class CapturingBus : IEventBus
+    {
+        public IIntegrationEvent? Value { get; private set; }
+        public Task PublishAsync<TEvent>(TEvent integrationEvent, CancellationToken cancellationToken = default) where TEvent : IIntegrationEvent
+        { Value = integrationEvent; return Task.CompletedTask; }
     }
 }
