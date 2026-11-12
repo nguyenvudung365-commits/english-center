@@ -37,10 +37,28 @@ public sealed partial class ClassService(IAcademicStore store, IEventBus events,
             throw DuplicateCode(code);
         }
 
-        await events.PublishAsync(new ClassCreatedIntegrationEvent(created.Id, created.Code, created.StartDate,
-            created.EndDate, created.MaxStudents, created.TuitionFee, created.ClassType.ToString()), ct);
+        await PublishClassAsync(created, ct);
         return ToResponse(created, course, teacher);
     }
+
+    public async Task ReplayAsync(Guid id, CancellationToken ct)
+    {
+        var found = await store.FindClassAsync(id, ct) ?? throw new AcademicFailure(404, "Class not found.");
+        await PublishClassAsync(found, ct);
+    }
+
+    public async Task<RepublishClassesResponse> RepublishAsync(CancellationToken ct)
+    {
+        var classes = await store.ClassesAsync(ct);
+        foreach (var value in classes)
+            await PublishClassAsync(value, ct);
+        return new RepublishClassesResponse(classes.Count);
+    }
+
+    // Dùng cùng payload cho tạo mới và backfill; chỉ đọc dữ liệu thuộc Academic.
+    private Task PublishClassAsync(Class value, CancellationToken ct) =>
+        events.PublishAsync(new ClassCreatedIntegrationEvent(value.Id, value.Code, value.StartDate,
+            value.EndDate, value.MaxStudents, value.TuitionFee, value.ClassType.ToString()), ct);
 
     public async Task<ClassResponse> GetAsync(Guid id, CancellationToken ct)
     {

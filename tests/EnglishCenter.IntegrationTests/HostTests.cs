@@ -4,7 +4,6 @@ using EnglishCenter.BuildingBlocks.EventBus;
 using EnglishCenter.Modules.Academic.Infrastructure.Persistence;
 using EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents;
 using EnglishCenter.Modules.Enrollment.Infrastructure.Persistence;
-using EnglishCenter.Modules.Finance.Application.Abstractions;
 using EnglishCenter.Modules.Finance.Infrastructure.Persistence;
 using EnglishCenter.Modules.Identity.Infrastructure.Persistence;
 using EnglishCenter.Modules.MediaNotification.Infrastructure.Persistence;
@@ -60,35 +59,7 @@ public class HostTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.Contains(handlers, h => h.GetType().Assembly.GetName().Name == "EnglishCenter.Modules.Finance.Application");
     }
 
-    [Fact]
-    public async Task F5_StudentEnrolled_CreatesRecord_AndIsIdempotent()
-    {
-        _ = _factory.Server;
-        var bus = _factory.Services.GetRequiredService<IEventBus>();
-        var recorder = _factory.Services.GetRequiredService<IInvoiceCreationRecorder>();
-        var evt = new StudentEnrolledIntegrationEvent(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1_500_000m, DateTime.UtcNow);
-
-        await bus.PublishAsync(evt);
-        Assert.Contains(evt.EnrollmentId, recorder.RecordedEnrollmentIds);
-        Assert.Equal(1, recorder.RecordedEnrollmentIds.Count(id => id == evt.EnrollmentId));
-
-        await bus.PublishAsync(evt);
-        Assert.Equal(1, recorder.RecordedEnrollmentIds.Count(id => id == evt.EnrollmentId));
-    }
-
-    [Fact]
-    public async Task F5b_DifferentEnrollments_CreateSeparateRecords()
-    {
-        _ = _factory.Server;
-        var bus = _factory.Services.GetRequiredService<IEventBus>();
-        var recorder = _factory.Services.GetRequiredService<IInvoiceCreationRecorder>();
-        var a = new StudentEnrolledIntegrationEvent(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1m, DateTime.UtcNow);
-        var b = new StudentEnrolledIntegrationEvent(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 2m, DateTime.UtcNow);
-        await bus.PublishAsync(a);
-        await bus.PublishAsync(b);
-        Assert.Contains(a.EnrollmentId, recorder.RecordedEnrollmentIds);
-        Assert.Contains(b.EnrollmentId, recorder.RecordedEnrollmentIds);
-    }
+    // Kiểm thử recorder F5/F5b đã được thay bằng kiểm thử DB thật trong Tv3Week3Tests.
 
     [Fact]
     public void D2_EachModuleDbContext_UsesOwnSchema()

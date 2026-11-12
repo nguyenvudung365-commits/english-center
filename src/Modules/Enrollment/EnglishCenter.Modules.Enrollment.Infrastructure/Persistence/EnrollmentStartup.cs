@@ -5,13 +5,14 @@ using Microsoft.Extensions.Hosting;
 
 namespace EnglishCenter.Modules.Enrollment.Infrastructure.Persistence;
 
-internal sealed class EnrollmentStartup(IServiceScopeFactory scopes, IConfiguration config) : IHostedService
+internal sealed class EnrollmentStartup(IServiceScopeFactory scopes, IConfiguration configuration) : IHostedService
 {
     public async Task StartAsync(CancellationToken ct)
     {
-        if (!bool.TryParse(config["Enrollment:InitializeDatabase"], out var enabled) || !enabled) return;
+        if (!bool.TryParse(configuration["Enrollment:InitializeDatabase"], out var initialize) || !initialize) return;
         await using var scope = scopes.CreateAsyncScope();
         await scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>().Database.MigrateAsync(ct);
     }
+
     public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
 }

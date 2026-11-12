@@ -35,7 +35,15 @@ def loopback(service):
     assert all(port['host_ip'] == '127.0.0.1' for port in service['ports'])
 
 
+def initializes_all_modules(config, file):
+    environment = config['services']['api']['environment']
+    for module in ('Identity', 'Academic', 'Enrollment', 'Finance', 'MediaNotification'):
+        key = module + '__InitializeDatabase'
+        assert str(environment.get(key, '')).lower() == 'true', f'{file}: {key} must be true'
+
+
 base = render(['compose.yaml'])
+initializes_all_modules(base, 'compose.yaml')
 assert set(base['services']) == {'api', 'postgres'}, 'Default deployment must not start MinIO'
 assert set(base['volumes']) == {'postgres-data'}
 assert base['volumes']['postgres-data']['name'] == 'ec-config-test_postgres-data'
@@ -74,6 +82,7 @@ local_env = dict(env, MINIO_ROOT_USER='local-root-only', MINIO_ROOT_PASSWORD='lo
 local_env.update(MEDIA_STORAGE_PUBLIC_ENDPOINT='http://localhost:9000',
                  MEDIA_STORAGE_BUCKET='english-center-media', MEDIA_STORAGE_REGION='us-east-1')
 local = render(['compose.minio.yaml'], local_env)
+initializes_all_modules(local, 'compose.minio.yaml')
 assert set(local['services']) == {'api', 'postgres', 'minio', 'minio-init'}
 local_api = local['services']['api']
 assert local_api['environment'][prefix + 'Endpoint'] == 'http://minio:9000'

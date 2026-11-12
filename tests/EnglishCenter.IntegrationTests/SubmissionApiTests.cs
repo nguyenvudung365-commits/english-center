@@ -3,12 +3,17 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
+using EnglishCenter.BuildingBlocks.EventBus;
 using EnglishCenter.BuildingBlocks.Security;
 using EnglishCenter.Modules.Academic.Domain.Classes;
 using EnglishCenter.Modules.Academic.Domain.Courses;
 using EnglishCenter.Modules.Academic.Domain.Teachers;
 using EnglishCenter.Modules.Academic.Infrastructure.Persistence;
+using EnglishCenter.Modules.Enrollment.Domain.Registrations;
+using EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents;
 using EnglishCenter.Modules.Enrollment.Infrastructure.Persistence;
+using EnglishCenter.Modules.Finance.Contracts.IntegrationEvents;
+using EnglishCenter.Modules.Finance.Infrastructure.Persistence;
 using EnglishCenter.Modules.Identity.Application.Authentication;
 using EnglishCenter.Modules.Identity.Domain.Users;
 using EnglishCenter.Modules.Identity.Infrastructure.Persistence;
@@ -45,6 +50,7 @@ public sealed class SubmissionApiTests : IAsyncLifetime
         await identity.Database.EnsureCreatedAsync();
         await academic.Database.EnsureCreatedAsync();
         await scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>().Database.EnsureCreatedAsync();
+        await scope.ServiceProvider.GetRequiredService<FinanceDbContext>().Database.EnsureCreatedAsync();
         await scope.ServiceProvider.GetRequiredService<MediaNotificationDbContext>().Database.EnsureCreatedAsync();
         var passwords = scope.ServiceProvider.GetRequiredService<IPasswordService>();
         foreach (var (name, role) in new[] { ("admin", Roles.Admin), ("staff", Roles.Staff), ("teacher", Roles.Teacher),
@@ -63,6 +69,11 @@ public sealed class SubmissionApiTests : IAsyncLifetime
         academic.Classes.Add(item);
         classId = item.Id;
         await academic.SaveChangesAsync();
+        var enrollment = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+        foreach (var name in new[] { "student", "other-student" })
+            enrollment.Students.Add(new Student(users[name], name, $"{name}@example.test"));
+        enrollment.Classes.Add(new ClassSnapshot(item.Id, item.Code, item.StartDate, item.EndDate, item.MaxStudents, item.TuitionFee));
+        await enrollment.SaveChangesAsync();
     }
 
     public async Task DisposeAsync() { client.Dispose(); await factory.DisposeAsync(); }
@@ -79,7 +90,19 @@ public sealed class SubmissionApiTests : IAsyncLifetime
     private async Task<Guid> Enroll()
     {
         await As("admin");
-        var response = await client.PostAsJsonAsync("/api/enrollment/enrollments", new { classId, studentId = users["student"] });
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+            if (!await db.Enrollments.AnyAsync(x => x.ClassId == classId && x.StudentId == users["student"]))
+            {
+                var registered = await client.PostAsJsonAsync("/api/enrollment/enrollments", new
+                {
+                    classId, studentId = users["student"], maxAbsences = 3, maxLates = 5, maxSkippedAssignments = 2
+                });
+                Assert.Equal(HttpStatusCode.Created, registered.StatusCode);
+            }
+        }
+        var response = await client.PostAsJsonAsync("/api/enrollment/memberships", new { classId, studentId = users["student"] });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await Json(response)).GetProperty("id").GetGuid();
     }
@@ -199,11 +222,11 @@ public sealed class SubmissionApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(path)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/academic/assignments/{assignment}/submissions")).StatusCode);
         await As("student");
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/enrollment/enrollments", new { classId, studentId = users["student"] })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/enrollment/memberships", new { classId, studentId = users["student"] })).StatusCode);
         await As("admin");
-        var enrollments = await client.GetFromJsonAsync<JsonElement[]>($"/api/enrollment/enrollments?classId={classId}");
+        var enrollments = await client.GetFromJsonAsync<JsonElement[]>($"/api/enrollment/memberships?classId={classId}");
         var id = enrollments!.Single().GetProperty("id").GetGuid();
-        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/enrollment/enrollments/{id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/enrollment/memberships/{id}")).StatusCode);
         await As("student");
         Assert.Equal(HttpStatusCode.Forbidden, (await Submit(assignment, [file])).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(path)).StatusCode);
@@ -244,13 +267,13 @@ public sealed class SubmissionApiTests : IAsyncLifetime
             (await db.Users.SingleAsync(x => x.Id == users["student"])).SetLocked(true);
             await db.SaveChangesAsync();
         }
-        var response = await client.PostAsJsonAsync("/api/enrollment/enrollments", new
+        var response = await client.PostAsJsonAsync("/api/enrollment/memberships", new
         {
             classId = kind == "missing-class" ? Guid.NewGuid() : classId,
             studentId = kind switch { "teacher-account" => users["teacher"], "unknown-student" => Guid.NewGuid(), "empty-student" => Guid.Empty, _ => users["student"] }
         });
         Assert.Equal(expected, response.StatusCode);
-        Assert.Empty((await client.GetFromJsonAsync<JsonElement[]>($"/api/enrollment/enrollments?classId={classId}"))!);
+        Assert.Empty((await client.GetFromJsonAsync<JsonElement[]>($"/api/enrollment/memberships?classId={classId}"))!);
     }
 
     [Fact]
@@ -258,9 +281,9 @@ public sealed class SubmissionApiTests : IAsyncLifetime
     {
         var id = await Enroll();
         Assert.Equal(id, await Enroll());
-        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/enrollment/enrollments/{id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/enrollment/memberships/{id}")).StatusCode);
         Assert.Equal(id, await Enroll());
-        Assert.True(Assert.Single((await client.GetFromJsonAsync<JsonElement[]>($"/api/enrollment/enrollments?classId={classId}"))!).GetProperty("isActive").GetBoolean());
+        Assert.True(Assert.Single((await client.GetFromJsonAsync<JsonElement[]>($"/api/enrollment/memberships?classId={classId}"))!).GetProperty("isActive").GetBoolean());
     }
 
     [Fact]
@@ -297,8 +320,8 @@ public sealed class SubmissionApiTests : IAsyncLifetime
         var id = await Assignment(); var file = await File(); await As("student");
         Assert.Equal(HttpStatusCode.OK, (await Submit(id, [file])).StatusCode);
         await As("admin");
-        var membership = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>($"/api/enrollment/enrollments?classId={classId}"))!);
-        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/enrollment/enrollments/{membership.GetProperty("id").GetGuid()}")).StatusCode);
+        var membership = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>($"/api/enrollment/memberships?classId={classId}"))!);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/enrollment/memberships/{membership.GetProperty("id").GetGuid()}")).StatusCode);
         await As("student");
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/academic/assignments/{id}")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/academic/assignments?classId={classId}")).StatusCode);
@@ -326,7 +349,7 @@ public sealed class SubmissionApiTests : IAsyncLifetime
         await As("student");
         var submission = await Json(await Submit(assignment, [file]));
         await As("admin");
-        var membership = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>($"/api/enrollment/enrollments?classId={classId}"))!);
+        var membership = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>($"/api/enrollment/memberships?classId={classId}"))!);
         var rosterId = membership.GetProperty("id").GetGuid();
         await As(actor);
         var token = client.DefaultRequestHeaders.Authorization;
@@ -351,17 +374,134 @@ public sealed class SubmissionApiTests : IAsyncLifetime
         { classId, title = "Revoked", opensAtUtc = now, closesAtUtc = now.AddHours(1) })).StatusCode);
         if (actor != "teacher")
         {
-            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/enrollment/enrollments?classId={classId}")).StatusCode);
-            Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync($"/api/enrollment/enrollments/{rosterId}")).StatusCode);
-            Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/enrollment/enrollments", new
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/enrollment/memberships?classId={classId}")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync($"/api/enrollment/memberships/{rosterId}")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/enrollment/memberships", new
             { classId, studentId = users["other-student"] })).StatusCode);
         }
         Assert.Equal(token, client.DefaultRequestHeaders.Authorization);
     }
 
-    private sealed class SubmissionFactory : WebApplicationFactory<Program>
+    [Theory]
+    [InlineData("staff", false, false)]
+    [InlineData("admin", false, false)]
+    [InlineData("staff", true, false)]
+    [InlineData("admin", true, false)]
+    [InlineData("staff", false, true)]
+    [InlineData("admin", false, true)]
+    [InlineData("staff", true, true)]
+    [InlineData("admin", true, true)]
+    public async Task AccountRevocation_RejectsExistingTokenForFinancialEnrollmentAndReplay_WithoutMutation(string actor, bool changeRole, bool replay)
+    {
+        Guid? registrationId = replay ? await Enroll() : null;
+        Guid? invoiceId = null;
+        if (replay)
+        {
+            using var scope = factory.Services.CreateScope();
+            invoiceId = (await scope.ServiceProvider.GetRequiredService<FinanceDbContext>().Invoices.SingleAsync()).Id;
+        }
+        await As(actor);
+        var token = client.DefaultRequestHeaders.Authorization;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var user = await db.Users.SingleAsync(x => x.Id == users[actor]);
+            if (changeRole) db.Entry(user).Property(x => x.Role).CurrentValue = Roles.Student;
+            else user.SetLocked(true);
+            await db.SaveChangesAsync();
+        }
+
+        var response = replay
+            ? await client.PostAsync($"/api/enrollment/enrollments/{registrationId}/replay", null)
+            : await client.PostAsJsonAsync("/api/enrollment/enrollments", new
+            {
+                classId, studentId = users["student"], maxAbsences = 3, maxLates = 5, maxSkippedAssignments = 2
+            });
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(token, client.DefaultRequestHeaders.Authorization);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+            var count = replay ? 1 : 0;
+            Assert.Equal(count, await db.Enrollments.CountAsync());
+            Assert.Equal(count, (await db.Classes.SingleAsync()).CurrentStudents);
+            var finance = scope.ServiceProvider.GetRequiredService<FinanceDbContext>();
+            Assert.Equal(count, await finance.Invoices.CountAsync());
+            Assert.Equal(count, factory.EnrollmentEvents.Count);
+            Assert.Equal(count, factory.InvoiceEvents.Count);
+            if (replay)
+            {
+                var stored = await db.Enrollments.SingleAsync();
+                Assert.Equal(registrationId, stored.Id);
+                Assert.Equal("Active", stored.Status);
+                Assert.True(stored.IsActive);
+                Assert.Equal((3, 5, 2), (stored.MaxAbsences, stored.MaxLates, stored.MaxSkippedAssignments));
+                Assert.Equal(invoiceId, (await finance.Invoices.SingleAsync()).Id);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("staff", false, false)]
+    [InlineData("admin", false, false)]
+    [InlineData("staff", true, false)]
+    [InlineData("admin", true, false)]
+    [InlineData("staff", false, true)]
+    [InlineData("admin", false, true)]
+    [InlineData("staff", true, true)]
+    [InlineData("admin", true, true)]
+    [InlineData("student", false, false)]
+    [InlineData("student", true, false)]
+    [InlineData("student", false, true)]
+    [InlineData("student", true, true)]
+    public async Task AccountRevocation_RejectsExistingTokenForFinancialReads(string actor, bool changeRole, bool invoice)
+    {
+        var registrationId = await Enroll();
+        var path = invoice
+            ? $"/api/finance/invoices/by-enrollment/{registrationId}"
+            : $"/api/enrollment/enrollments/{registrationId}";
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+            Assert.Equal(users["student"], (await db.Enrollments.SingleAsync()).StudentId);
+            Assert.Single(await scope.ServiceProvider.GetRequiredService<FinanceDbContext>().Invoices.ToListAsync());
+        }
+        await As("student");
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(path)).StatusCode);
+        await As("other-student");
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(path)).StatusCode);
+        await As(actor);
+        var token = client.DefaultRequestHeaders.Authorization;
+        Assert.NotNull(token);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(path)).StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var user = await db.Users.SingleAsync(x => x.Id == users[actor]);
+            if (changeRole)
+                db.Entry(user).Property(x => x.Role).CurrentValue = actor == "student" ? Roles.Teacher : Roles.Student;
+            else user.SetLocked(true);
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(token, client.DefaultRequestHeaders.Authorization);
+        var response = await client.GetAsync(path);
+        Assert.Equal(token, client.DefaultRequestHeaders.Authorization);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    private sealed class SubmissionFactory : WebApplicationFactory<Program>,
+        IIntegrationEventHandler<StudentEnrolledIntegrationEvent>, IIntegrationEventHandler<InvoiceCreatedIntegrationEvent>
     {
         private readonly List<SqliteConnection> connections = [];
+        public System.Collections.Concurrent.ConcurrentBag<StudentEnrolledIntegrationEvent> EnrollmentEvents { get; } = [];
+        public System.Collections.Concurrent.ConcurrentBag<InvoiceCreatedIntegrationEvent> InvoiceEvents { get; } = [];
+        public Task HandleAsync(StudentEnrolledIntegrationEvent value, CancellationToken ct = default)
+        { EnrollmentEvents.Add(value); return Task.CompletedTask; }
+        public Task HandleAsync(InvoiceCreatedIntegrationEvent value, CancellationToken ct = default)
+        { InvoiceEvents.Add(value); return Task.CompletedTask; }
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
@@ -369,12 +509,16 @@ public sealed class SubmissionApiTests : IAsyncLifetime
             {
                 ["Jwt:SigningKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48)),
                 ["Identity:InitializeDatabase"] = "false", ["Academic:InitializeDatabase"] = "false",
-                ["Enrollment:InitializeDatabase"] = "false", ["MediaNotification:InitializeDatabase"] = "false"
+                ["Enrollment:InitializeDatabase"] = "false", ["MediaNotification:InitializeDatabase"] = "false",
+                ["Finance:InitializeDatabase"] = "false"
             }));
             builder.ConfigureTestServices(services =>
             {
                 Sqlite<IdentityDbContext>(services); Sqlite<AcademicDbContext>(services);
                 Sqlite<EnrollmentDbContext>(services); Sqlite<MediaNotificationDbContext>(services);
+                Sqlite<FinanceDbContext>(services);
+                services.AddSingleton<IIntegrationEventHandler<StudentEnrolledIntegrationEvent>>(this);
+                services.AddSingleton<IIntegrationEventHandler<InvoiceCreatedIntegrationEvent>>(this);
                 services.RemoveAll<IObjectStorage>(); services.AddSingleton<IObjectStorage, DownloadStorage>();
             });
         }

@@ -211,6 +211,31 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Classes.ClassStudent", b =>
+                {
+                    b.Property<Guid>("EnrollmentId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("enrollment_id");
+
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("class_id");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("student_id");
+
+                    b.HasKey("EnrollmentId");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("StudentId", "ClassId")
+                        .IsUnique();
+
+                    b.ToTable("class_students", "academic");
+                });
+
             modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Courses.Course", b =>
                 {
                     b.Property<Guid>("Id")
@@ -339,6 +364,15 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.Submission", b =>
                 {
                     b.Navigation("Files");
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Classes.ClassStudent", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Classes.Class", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

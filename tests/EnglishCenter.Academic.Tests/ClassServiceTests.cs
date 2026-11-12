@@ -155,4 +155,45 @@ public class ClassServiceTests
         var failure = await Assert.ThrowsAsync<AcademicFailure>(() => Service().GetAsync(Guid.NewGuid(), default));
         Assert.Equal(404, failure.Status);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReplayAndRepublish_PreserveOriginalPayload_WithNewEventIds(bool bulk)
+    {
+        var created = await Service().CreateAsync(Valid() with { ClassType = "Supplementary" }, default);
+        var original = Assert.IsType<ClassCreatedIntegrationEvent>(Assert.Single(_events.Published));
+        _events.Published.Clear();
+
+        for (var i = 0; i < 2; i++)
+        {
+            if (bulk) Assert.Equal(1, (await Service().RepublishAsync(default)).Published);
+            else await Service().ReplayAsync(created.Id, default);
+        }
+
+        Assert.Equal(2, _events.Published.Count);
+        foreach (var value in _events.Published)
+        {
+            var replay = Assert.IsType<ClassCreatedIntegrationEvent>(value);
+            Assert.Equal(original, replay with { EventId = original.EventId, OccurredOnUtc = original.OccurredOnUtc });
+        }
+        Assert.Equal(3, _events.Published.Select(x => x.EventId).Append(original.EventId).Distinct().Count());
+        Assert.Single(_store.Classes);
+        Assert.Equal(1, _store.SaveCount);
+    }
+
+    [Fact]
+    public async Task Republish_EmptyAcademicStore_PublishesNothing()
+    {
+        Assert.Equal(0, (await Service().RepublishAsync(default)).Published);
+        Assert.Empty(_events.Published);
+    }
+
+    [Fact]
+    public async Task Replay_UnknownClass_Returns404_WithoutPublishing()
+    {
+        var failure = await Assert.ThrowsAsync<AcademicFailure>(() => Service().ReplayAsync(Guid.NewGuid(), default));
+        Assert.Equal(404, failure.Status);
+        Assert.Empty(_events.Published);
+    }
 }

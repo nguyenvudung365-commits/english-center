@@ -13,6 +13,7 @@ public sealed class AcademicDbContext : DbContext
     public DbSet<Class> Classes => Set<Class>();
     public DbSet<EnglishCenter.Modules.Academic.Domain.Assignments.Assignment> Assignments => Set<EnglishCenter.Modules.Academic.Domain.Assignments.Assignment>();
     public DbSet<EnglishCenter.Modules.Academic.Domain.Assignments.Submission> Submissions => Set<EnglishCenter.Modules.Academic.Domain.Assignments.Submission>();
+    public DbSet<ClassStudent> ClassStudents => Set<ClassStudent>();
 
     public AcademicDbContext(DbContextOptions<AcademicDbContext> options) : base(options)
     {
@@ -22,6 +23,12 @@ public sealed class AcademicDbContext : DbContext
     {
         modelBuilder.HasDefaultSchema(AcademicSchema.Name);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AcademicDbContext).Assembly);
+        modelBuilder.Entity<ClassStudent>(b =>
+        {
+            b.ToTable("class_students"); b.HasKey(x => x.EnrollmentId);
+            b.HasIndex(x => new { x.StudentId, x.ClassId }).IsUnique();
+            b.HasOne<Class>().WithMany().HasForeignKey(x => x.ClassId).OnDelete(DeleteBehavior.Restrict);
+        });
 
         // Tài liệu 04: tên cột snake_case (CourseId -> course_id).
         foreach (var entity in modelBuilder.Model.GetEntityTypes())

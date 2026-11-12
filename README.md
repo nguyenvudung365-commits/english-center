@@ -23,7 +23,7 @@ English Center hướng tới quản lý toàn bộ luồng vận hành đào t�
 
 Dự án sử dụng **một ứng dụng triển khai, nhiều module nghiệp vụ**. Mỗi module có ranh giới dữ liệu và các tầng riêng, giúp các thành viên phát triển song song mà vẫn giữ khả năng kiểm thử và tích hợp.
 
-> Dự án đang phát triển. `develop` là nhánh tích hợp; README này mô tả cả nền code hiện có trên `develop` và phần TV1 tuần 3 trong [PR #8](https://github.com/nguyenvudung365-commits/english-center/pull/8). Nếu PR chưa merge, checkout nhánh `feature/tv1-tuan-3-quyen-loi-api` để sử dụng đầy đủ các chức năng tuần 3 bên dưới. Việc có cấu hình CI/CD không đồng nghĩa hệ thống đã được triển khai production.
+> Dự án đang phát triển. Nhánh TV3 đã tích hợp `develop` tại `fc3542d`, gồm phần TV1 tuần 3 trong [PR #8](https://github.com/nguyenvudung365-commits/english-center/pull/8). Phần ghi danh và hóa đơn tuần 3 được mô tả tại [TV3_WEEK3.md](TV3_WEEK3.md). Việc có cấu hình CI/CD không đồng nghĩa hệ thống đã được triển khai production.
 
 ## Trạng thái
 
@@ -33,11 +33,11 @@ Dự án sử dụng **một ứng dụng triển khai, nhiều module nghiệp 
 | Identity | Đã tích hợp vào develop: đăng nhập, JWT, refresh token, đăng xuất, đổi mật khẩu, tạo tài khoản và phân quyền |
 | TV1 tuần 3 — PR #8 | Bổ sung `ICurrentUser`, đọc claim an toàn, chuẩn phản hồi lỗi tại Host, API phát lại sự kiện tài khoản và kiểm thử phân quyền/hợp đồng lỗi |
 | Academic | Đã tích hợp US-07: tạo/đọc lớp, danh mục khóa học mẫu, danh sách giáo viên đồng bộ từ `UserRegistered`, validation, phân quyền và event `ClassCreated` |
-| Enrollment → Finance | Đã bổ sung test chuyển dữ liệu sang handler Finance, chống ghi nhận trùng EnrollmentId và publish đồng thời; recorder hiện vẫn là in-memory, chưa phải hóa đơn lưu database |
-| Kiểm thử | Bản tích hợp local tại commit `1cddae3`: **255 passed, 0 failed, 4 skipped**; không cộng kết quả review các nhánh cũ |
-| Nghiệp vụ tiếp theo | Lịch học, ghi danh thực tế, hóa đơn bền vững, bài tập, lưu file và thông báo tiếp tục được phát triển |
+| Enrollment → Finance | US-12/US-23: lưu ghi danh và hóa đơn vào database, chặn trùng/đầy/kết thúc, transaction sĩ số, hóa đơn duy nhất theo EnrollmentId, đúng học phí/hạn; có replay đối soát và danh sách lớp của học viên |
+| Kiểm thử | Bản TV3 tuần 3 tích hợp develop `fc3542d`, ngày 05/11/2026: **281 passed, 0 failed, 0 skipped**, gồm PostgreSQL thật của Identity và TV3 |
+| Nghiệp vụ tiếp theo | Lịch học/lịch dạy, xác nhận thanh toán, bài tập, lưu file và thông báo tiếp tục được phát triển |
 | Docker và CI/CD | `develop` đã có Dockerfile multi-stage, Compose, GitHub Actions, Jenkinsfile và script smoke container; xem phạm vi và giới hạn bên dưới |
-| PostgreSQL | Identity/Academic có migration; bốn test Identity PostgreSQL tùy chọn bị bỏ qua trong lần chạy local nêu trên, không tính là đã đạt |
+| PostgreSQL | Identity/Academic/Enrollment/Finance có migration; CI đã cấu hình server kiểm thử riêng và bật cả test PostgreSQL của Identity lẫn TV3 |
 
 Số liệu kiểm thử trên là kết quả local tại thời điểm bàn giao, không phải trạng thái CI trực tiếp. Repository hiện chưa có bản phát hành production.
 
@@ -189,7 +189,7 @@ Copy-Item .env.example .env
 
 Trong `.env`, cấu hình `POSTGRES_PASSWORD`, `JWT_SIGNING_KEY` (ít nhất 32 byte UTF-8), `MEDIA_STORAGE_ENDPOINT`, `MEDIA_STORAGE_PUBLIC_ENDPOINT`, `MEDIA_STORAGE_BUCKET` và cặp R2 **Access Key ID / Secret Access Key** qua `MEDIA_STORAGE_ACCESS_KEY`/`MEDIA_STORAGE_SECRET_KEY`. Hai endpoint dùng cùng S3 API HTTPS từ Cloudflare, ví dụ `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, **không thêm tên bucket**, không dùng domain website hoặc `r2.dev`. Region là `auto`. Token chỉ có Object Read & Write cho bucket cần dùng; không dùng Token value thay Secret Access Key. Bucket giữ private; CORS cấu hình trên Cloudflare, xem [hướng dẫn storage](docs/api/media-storage.md).
 
-Nếu cần admin đầu tiên, đặt thêm `BOOTSTRAP_ADMIN_EMAIL` và `BOOTSTRAP_ADMIN_PASSWORD` (8–128 ký tự). Đây là mật khẩu website riêng, không phải mật khẩu email/VPS. Không commit `.env` hoặc secret thật. Compose bật migration Identity, Academic và MediaNotification; không cần override Academic.
+Nếu cần admin đầu tiên, đặt thêm `BOOTSTRAP_ADMIN_EMAIL` và `BOOTSTRAP_ADMIN_PASSWORD` (8–128 ký tự). Đây là mật khẩu website riêng, không phải mật khẩu email/VPS. Không commit `.env` hoặc secret thật. Cả hai stack Compose bật migration Identity, Academic, Enrollment, Finance và MediaNotification; không cần override Academic.
 
 ```bash
 docker compose --env-file .env -f compose.yaml -f compose.web.yaml config --quiet
@@ -284,6 +284,14 @@ Sau khi khởi tạo cả hai schema, đăng nhập Staff/Admin và thực hiệ
 ```
 
 `classType` nhận `Main` hoặc `Supplementary`. Mã lớp được chuẩn hóa và phải duy nhất; ngày kết thúc sau ngày bắt đầu, sĩ số lớn hơn 0, học phí là số nguyên VND từ 0 đến 999.999.999.999. Tạo thành công trả 201 cùng địa chỉ đọc lại và phát `ClassCreated`. Trạng thái lớp suy ra từ ngày theo giờ Việt Nam (UTC+7).
+
+**Đồng bộ lớp cũ sang Enrollment (TV3 tuần 3):** Staff/Admin gọi `POST /api/academic/classes/republish` (không body, 200 với `{ "published": N }`) để phát lại toàn bộ lớp, hoặc `POST /api/academic/classes/{id}/replay` (không body, 202; lớp không tồn tại trả 404) để phát lại một lớp. Chưa đăng nhập trả 401, Student/Teacher trả 403. Academic chỉ đọc schema của mình và phát `ClassCreated`; Enrollment dựng snapshot theo `ClassId`, không tạo trùng và không đặt lại sĩ số đang có. Phản hồi chỉ xác nhận phát sự kiện, cần kiểm tra luồng ghi danh/hóa đơn và log handler để xác nhận đồng bộ. Xem [hướng dẫn backfill và demo tuần 3](TV3_WEEK3.md#backfill-lớp-và-tài-khoản-đã-tồn-tại) để có lệnh PowerShell cụ thể.
+
+### Ghi danh và quyền truy cập bài tập
+
+`/api/enrollment/enrollments` là luồng ghi danh có kiểm tra sĩ số, học phí, giới hạn vi phạm và phát sự kiện tạo hóa đơn. `/api/enrollment/memberships` chỉ cấp/thu hồi quyền bài tập trên ghi danh còn hiệu lực đã có; không tự tạo ghi danh, hóa đơn hoặc thay đổi sĩ số. Thu hồi quyền bài tập không hủy ghi danh hay hóa đơn.
+
+Migration `UnifyEnrollmentMembership` hợp nhất quyền bài tập cũ vào bản ghi ghi danh. Sao lưu database trước khi cập nhật. Nếu có dữ liệu `class_enrollments` chưa có ghi danh tương ứng, migration chủ động dừng và giữ dữ liệu: cần giáo vụ đối soát, tạo ghi danh bằng luồng nghiệp vụ với học phí/giới hạn đã duyệt, kiểm tra sĩ số và phát lại sự kiện còn thiếu trước khi chạy lại. Không tự biến quyền bài tập cũ thành nghĩa vụ học phí. Migration này không hỗ trợ rollback tự động; khôi phục bản sao lưu nếu cần trở về trước khi hợp nhất.
 
 ## Kiểm thử
 

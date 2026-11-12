@@ -25,6 +25,7 @@ internal sealed class FakeAcademicStore : IAcademicStore
     public Task<bool> ClassCodeExistsAsync(string normalizedCode, CancellationToken ct) =>
         Task.FromResult(Classes.Any(x => x.Code == normalizedCode));
     public Task<Class?> FindClassAsync(Guid id, CancellationToken ct) => Task.FromResult(Classes.SingleOrDefault(x => x.Id == id));
+    public Task<IReadOnlyList<Class>> ClassesAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<Class>>(Classes);
     public Task<Course?> FindCourseAsync(Guid id, CancellationToken ct) => Task.FromResult(Courses.SingleOrDefault(x => x.Id == id));
     public Task<IReadOnlyList<Course>> CoursesAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<Course>>(Courses);
     public Task<Teacher?> FindTeacherAsync(Guid id, CancellationToken ct) => Task.FromResult(Teachers.SingleOrDefault(x => x.Id == id));

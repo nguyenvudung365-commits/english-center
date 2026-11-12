@@ -1,58 +1,54 @@
-using EnglishCenter.BuildingBlocks.Security;
 using EnglishCenter.Modules.Academic.Contracts;
+using EnglishCenter.Modules.Enrollment.Application.Registrations;
 using EnglishCenter.Modules.Enrollment.Contracts;
-using EnglishCenter.Modules.Enrollment.Domain.Enrollments;
 using EnglishCenter.Modules.Identity.Contracts;
 
 namespace EnglishCenter.Modules.Enrollment.Application.Enrollments;
 
 public sealed record CreateEnrollmentRequest(Guid ClassId, Guid StudentId);
-public sealed record EnrollmentResponse(Guid Id, Guid ClassId, Guid StudentId, bool IsActive);
-public sealed class EnrollmentFailure(int status, string message) : Exception(message) { public int Status { get; } = status; }
-public interface IEnrollmentStore
-{
-    Task<ClassEnrollment?> FindAsync(Guid id, CancellationToken ct);
-    Task<ClassEnrollment?> FindAsync(Guid classId, Guid studentId, CancellationToken ct);
-    Task<IReadOnlyList<ClassEnrollment>> ListAsync(Guid classId, CancellationToken ct);
-    void Add(ClassEnrollment item);
-    Task SaveAsync(CancellationToken ct);
-}
+public sealed record EnrollmentStatusRequest(bool IsActive);
 
-public sealed class EnrollmentService(IEnrollmentStore store, IClassDirectory classes,
-    IStudentDirectory students, ICurrentUser current, TimeProvider clock, IAccountAccess accounts) : IEnrollmentAccess
+// Coursework access requires an existing financial registration; it never creates a seat or invoice.
+public sealed class EnrollmentService(IEnrollmentStore store, Registrations.EnrollmentService registrations,
+    IClassDirectory classes, IStudentDirectory students) : IEnrollmentAccess
 {
-    private async Task ManagerAsync(CancellationToken ct)
-    {
-        if (!current.IsAuthenticated || current.UserId is null || current.UserId == Guid.Empty) throw new EnrollmentFailure(401, "Authentication required.");
-        if (current.Role is not (Roles.Admin or Roles.Staff)) throw new EnrollmentFailure(403, "Only staff manage class membership.");
-        if (!await accounts.IsActiveInRoleAsync(current.UserId.Value, current.Role, ct))
-            throw new EnrollmentFailure(403, "An active staff account with the current role is required.");
-    }
     public async Task<EnrollmentResponse> CreateAsync(CreateEnrollmentRequest request, CancellationToken ct)
     {
-        await ManagerAsync(ct);
-        if (request.ClassId == Guid.Empty || request.StudentId == Guid.Empty) throw new EnrollmentFailure(400, "Class and student are required.");
-        if (await classes.FindClassAsync(request.ClassId, ct) is null) throw new EnrollmentFailure(404, "Class not found.");
-        if (!await students.IsActiveStudentAsync(request.StudentId, ct)) throw new EnrollmentFailure(400, "An active student account is required.");
-        var item = await store.FindAsync(request.ClassId, request.StudentId, ct);
-        if (item is null) { item = ClassEnrollment.Create(request.ClassId, request.StudentId, clock.GetUtcNow()); store.Add(item); }
-        else item.SetActive(true);
-        await store.SaveAsync(ct);
-        return Response(item);
+        await registrations.EnsureManagerAsync(ct);
+        if (request.ClassId == Guid.Empty || request.StudentId == Guid.Empty)
+            throw new EnrollmentFailure(400, "Class and student are required.");
+        if (await classes.FindClassAsync(request.ClassId, ct) is null)
+            throw new EnrollmentFailure(404, "Class not found.");
+        if (!await students.IsActiveStudentAsync(request.StudentId, ct))
+            throw new EnrollmentFailure(400, "An active student account is required.");
+
+        var existing = await store.FindAsync(request.ClassId, request.StudentId, ct)
+            ?? throw new EnrollmentFailure(409,
+                "Create a financial registration through /api/enrollment/enrollments with approved violation limits before granting coursework access.");
+        if (existing.Status != "Active")
+            throw new EnrollmentFailure(409, "An active financial registration is required for coursework access.");
+        return await registrations.SetActiveAsync(existing.Id, true, ct);
     }
+
     public async Task<IReadOnlyList<EnrollmentResponse>> ListAsync(Guid classId, CancellationToken ct)
     {
-        await ManagerAsync(ct);
+        await registrations.EnsureManagerAsync(ct);
         if (classId == Guid.Empty) throw new EnrollmentFailure(400, "Class is required.");
-        return (await store.ListAsync(classId, ct)).Select(Response).ToList();
+        return (await store.ListAsync(classId, ct)).Select(Registrations.EnrollmentService.Response).ToList();
     }
-    public async Task RevokeAsync(Guid id, CancellationToken ct)
+
+    public async Task<EnrollmentResponse> SetActiveAsync(Guid id, bool active, CancellationToken ct)
     {
-        await ManagerAsync(ct);
-        var item = await store.FindAsync(id, ct) ?? throw new EnrollmentFailure(404, "Membership not found.");
-        item.SetActive(false); await store.SaveAsync(ct);
+        await registrations.EnsureManagerAsync(ct);
+        var item = await store.FindAsync(id, ct) ?? throw new EnrollmentFailure(404, "Enrollment not found.");
+        if (active && !await students.IsActiveStudentAsync(item.StudentId, ct))
+            throw new EnrollmentFailure(400, "An active student account is required.");
+        return await registrations.SetActiveAsync(id, active, ct);
     }
+
+    public async Task RevokeAsync(Guid id, CancellationToken ct) => await SetActiveAsync(id, false, ct);
+
     public async Task<bool> IsActiveAsync(Guid classId, Guid studentId, CancellationToken ct) =>
-        await students.IsActiveStudentAsync(studentId, ct) && (await store.FindAsync(classId, studentId, ct))?.IsActive == true;
-    private static EnrollmentResponse Response(ClassEnrollment item) => new(item.Id, item.ClassId, item.StudentId, item.IsActive);
+        await students.IsActiveStudentAsync(studentId, ct) &&
+        await store.FindAsync(classId, studentId, ct) is { Status: "Active", IsActive: true };
 }

@@ -713,10 +713,10 @@ function App() {
                                 </ManagerOnly>
                             }
                         />
-                         <Route path="/assignments" element={<Assignments />} />
-                         <Route path="/assignments/:id" element={<AssignmentDetails />} />
-                         <Route path="/enrollment" element={<Enrollments />} />
-                         {[
+                        <Route path="/assignments" element={<Assignments />} />
+                        <Route path="/assignments/:id" element={<AssignmentDetails />} />
+                        <Route path="/enrollment" element={<Enrollments />} />
+                        {[
                             {
                                 path: "/invoices",
                                 title: "Hóa đơn & học phí",

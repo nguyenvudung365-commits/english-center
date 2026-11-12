@@ -15,6 +15,8 @@ internal sealed class AcademicStore(AcademicDbContext db) : IAcademicStore
     public Task<bool> ClassCodeExistsAsync(string normalizedCode, CancellationToken ct) =>
         db.Classes.AnyAsync(x => x.Code == normalizedCode, ct);
     public Task<Class?> FindClassAsync(Guid id, CancellationToken ct) => db.Classes.SingleOrDefaultAsync(x => x.Id == id, ct);
+    public async Task<IReadOnlyList<Class>> ClassesAsync(CancellationToken ct) =>
+        await db.Classes.AsNoTracking().OrderBy(x => x.Code).ToListAsync(ct);
     public Task<Course?> FindCourseAsync(Guid id, CancellationToken ct) => db.Courses.SingleOrDefaultAsync(x => x.Id == id, ct);
     public async Task<IReadOnlyList<Course>> CoursesAsync(CancellationToken ct) =>
         await db.Courses.AsNoTracking().OrderBy(x => x.Code).ToListAsync(ct);

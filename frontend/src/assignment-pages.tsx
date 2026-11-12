@@ -215,12 +215,12 @@ export function Enrollments() {
     if (!manager) return <><PageHeading title="Thành viên lớp" subtitle="Chỉ giáo vụ và quản trị viên quản lý thành viên lớp." /><p>Liên hệ giáo vụ để kiểm tra quyền học tập của bạn. Học viên không thể tự ghi danh qua trang này.</p></>;
     const validClass = isAcademicId(classId.trim());
     return <>
-        <PageHeading title="Thành viên lớp" subtitle="Cấp hoặc thu hồi quyền truy cập bài tập. Đây chưa phải quy trình ghi danh có học phí, kiểm tra sĩ số hay chuyển lớp." />
+        <PageHeading title="Thành viên lớp" subtitle="Cấp hoặc thu hồi quyền truy cập bài tập cho học viên đã ghi danh. Trang này không tạo ghi danh, hóa đơn hay thay đổi sĩ số." />
         <section className="panel"><h2>Tra cứu theo lớp</h2>
             <form className="academic-form" onSubmit={event => {
                 event.preventDefault(); if (!validClass) return;
                 const id = classId.trim(); setNotice("");
-                void action.run(signal => api<Enrollment[]>(`/enrollment/enrollments?classId=${id}`, { signal }), value => { setItems(value); setLoadedClass(id); });
+                void action.run(signal => api<Enrollment[]>(`/enrollment/memberships?classId=${id}`, { signal }), value => { setItems(value); setLoadedClass(id); });
             }}>
                 <label htmlFor="roster-class">ID lớp (UUID)</label><input id="roster-class" value={classId} disabled={action.busy} onChange={event => { setClassId(event.target.value); setItems(null); setLoadedClass(""); }} required />
                 <button className="secondary" disabled={action.busy || !validClass}>Tải thành viên</button>
@@ -229,13 +229,13 @@ export function Enrollments() {
             <form className="academic-form" onSubmit={event => {
                 event.preventDefault(); if (!validClass || !isAcademicId(studentId.trim())) return;
                 const id = classId.trim(); setNotice("");
-                void action.run(signal => api<Enrollment>("/enrollment/enrollments", { method: "POST", body: JSON.stringify({ classId: id, studentId: studentId.trim() }), signal }), value => {
+                void action.run(signal => api<Enrollment>("/enrollment/memberships", { method: "POST", body: JSON.stringify({ classId: id, studentId: studentId.trim() }), signal }), value => {
                     setItems(previous => loadedClass === id && previous ? [...previous.filter(item => item.id !== value.id), value] : [value]); setLoadedClass(id);
                     setStudentId(""); setNotice("Đã cấp quyền học tập. Bấm Tải thành viên để xem toàn bộ danh sách.");
                 });
             }}>
                 <label htmlFor="roster-student">ID tài khoản học viên (UUID)</label><input id="roster-student" value={studentId} disabled={action.busy} onChange={event => setStudentId(event.target.value)} required />
-                <p>Chỉ nhận tài khoản Student đang hoạt động và lớp đã tồn tại.</p>
+                <p>Học viên phải có ghi danh còn hiệu lực trong lớp. Nếu chưa có, giáo vụ cần hoàn tất ghi danh với học phí và giới hạn vi phạm trước khi cấp quyền học tập.</p>
                 <button className="primary" disabled={action.busy || !validClass || !isAcademicId(studentId.trim())}>Cấp quyền cho lớp ở trên</button>
             </form>
             <ErrorMessage error={action.error} /><p role="status">{action.busy ? "Đang xử lý…" : notice}</p>
@@ -245,7 +245,7 @@ export function Enrollments() {
                 {item.isActive && <button className="secondary" disabled={action.busy} onClick={() => {
                     if (!window.confirm(`Thu hồi quyền học tập của ${item.studentId}?`)) return;
                     setNotice("");
-                    void action.run(signal => api<void>(`/enrollment/enrollments/${item.id}`, { method: "DELETE", signal }), () => { setItems(previous => previous?.map(value => value.id === item.id ? { ...value, isActive: false } : value) ?? null); setNotice("Đã thu hồi quyền học tập."); });
+                    void action.run(signal => api<void>(`/enrollment/memberships/${item.id}`, { method: "DELETE", signal }), () => { setItems(previous => previous?.map(value => value.id === item.id ? { ...value, isActive: false } : value) ?? null); setNotice("Đã thu hồi quyền học tập."); });
                 }}>Thu hồi quyền</button>}
             </li>)}</ul>}
             {items?.length === 200 && <p>Đang hiển thị tối đa 200 thành viên.</p>}

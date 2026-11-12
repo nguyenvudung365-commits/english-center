@@ -13,6 +13,7 @@ services:
       Identity__InitializeDatabase: 'true'
       Academic__InitializeDatabase: 'true'
       Enrollment__InitializeDatabase: 'true'
+      Finance__InitializeDatabase: 'true'
       MediaNotification__InitializeDatabase: 'true'
       MediaNotification__Storage__Enabled: 'true'
       MediaNotification__Storage__Endpoint: http://minio:9000

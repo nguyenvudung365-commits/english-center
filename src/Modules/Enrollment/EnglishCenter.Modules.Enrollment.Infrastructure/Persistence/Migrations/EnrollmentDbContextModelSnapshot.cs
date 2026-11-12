@@ -23,31 +23,166 @@ namespace EnglishCenter.Modules.Enrollment.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Enrollments.ClassEnrollment", b =>
+            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.ClassSnapshot", b =>
+                {
+                    b.Property<Guid>("ClassId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("class_id");
+
+                    b.Property<string>("ClassCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("class_code");
+
+                    b.Property<int>("CurrentStudents")
+                        .HasColumnType("integer")
+                        .HasColumnName("current_students");
+
+                    b.Property<DateOnly>("EndDate")
+                        .HasColumnType("date")
+                        .HasColumnName("end_date");
+
+                    b.Property<int>("MaxStudents")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_students");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date")
+                        .HasColumnName("start_date");
+
+                    b.Property<decimal>("TuitionFee")
+                        .HasPrecision(12)
+                        .HasColumnType("numeric(12,0)")
+                        .HasColumnName("tuition_fee");
+
+                    b.HasKey("ClassId");
+
+                    b.ToTable("class_snapshots", "enrollment", t =>
+                        {
+                            t.HasCheckConstraint("ck_class_capacity", "max_students > 0 AND current_students >= 0 AND current_students <= max_students");
+
+                            t.HasCheckConstraint("ck_class_dates", "end_date > start_date");
+
+                            t.HasCheckConstraint("ck_class_tuition", "tuition_fee >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.Registration", b =>
                 {
                     b.Property<Guid>("Id")
-                        .HasColumnType("uuid");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("AbsenceCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("absence_count");
 
                     b.Property<Guid>("ClassId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("class_id");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
+                    b.Property<DateTime>("EnrolledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("enrolled_at");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<int>("LateCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("late_count");
+
+                    b.Property<int>("MaxAbsences")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_absences");
+
+                    b.Property<int>("MaxLates")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_lates");
+
+                    b.Property<int>("MaxSkippedAssignments")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_skipped_assignments");
+
+                    b.Property<int>("SkippedAssignmentCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("skipped_assignment_count");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
 
                     b.Property<Guid>("StudentId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("student_id");
+
+                    b.Property<decimal>("TuitionFee")
+                        .HasPrecision(12)
+                        .HasColumnType("numeric(12,0)")
+                        .HasColumnName("tuition_fee");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("StudentId");
+                    b.HasIndex("ClassId");
 
-                    b.HasIndex("ClassId", "StudentId")
+                    b.HasIndex("StudentId", "ClassId")
                         .IsUnique();
 
-                    b.ToTable("class_enrollments", "enrollment");
+                    b.ToTable("enrollments", "enrollment", t =>
+                        {
+                            t.HasCheckConstraint("ck_enrollment_limits", "max_absences >= 0 AND max_lates >= 0 AND max_skipped_assignments >= 0 AND absence_count >= 0 AND late_count >= 0 AND skipped_assignment_count >= 0");
+
+                            t.HasCheckConstraint("ck_enrollment_status", "status IN ('Active', 'Cancelled')");
+
+                            t.HasCheckConstraint("ck_enrollment_tuition", "tuition_fee >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.Student", b =>
+                {
+                    b.Property<Guid>("StudentId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("student_id");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("email");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("full_name");
+
+                    b.HasKey("StudentId");
+
+                    b.ToTable("students", "enrollment");
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.Registration", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Enrollment.Domain.Registrations.ClassSnapshot", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("EnglishCenter.Modules.Enrollment.Domain.Registrations.Student", null)
+                        .WithMany()
+                        .HasForeignKey("StudentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

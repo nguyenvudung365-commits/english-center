@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using EnglishCenter.Modules.Academic.Application.Classes;
 
 namespace EnglishCenter.Modules.Academic.Infrastructure;
 
@@ -34,6 +35,7 @@ public static class DependencyInjection
         if (maxFiles is < 1 or > 5 || maxTotalBytes is < 1 or > 50L * 1024 * 1024)
             throw new InvalidOperationException("Submission limits must be 1–5 files and 1–52428800 total bytes.");
         services.AddSingleton(new EnglishCenter.Modules.Academic.Application.Assignments.SubmissionLimits(maxFiles, maxTotalBytes));
+        services.AddScoped<IClassRoster, ClassRoster>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddHostedService<AcademicStartup>();
 
