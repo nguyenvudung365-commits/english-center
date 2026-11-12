@@ -82,7 +82,9 @@ async function request(path: string, init: RequestInit, token?: string) {
                 ...init.headers,
                 ...(token ? { Authorization: `Bearer ${token}` } : {}),
             },
-            signal: init.signal ?? AbortSignal.timeout(15000),
+            signal: init.signal
+                ? AbortSignal.any([init.signal, AbortSignal.timeout(15000)])
+                : AbortSignal.timeout(15000),
         });
     } catch (error) {
         if (init.signal?.aborted) throw error;

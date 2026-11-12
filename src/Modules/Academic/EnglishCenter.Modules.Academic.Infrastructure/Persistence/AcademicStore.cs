@@ -19,6 +19,12 @@ internal sealed class AcademicStore(AcademicDbContext db) : IAcademicStore
     public async Task<IReadOnlyList<Course>> CoursesAsync(CancellationToken ct) =>
         await db.Courses.AsNoTracking().OrderBy(x => x.Code).ToListAsync(ct);
     public Task<Teacher?> FindTeacherAsync(Guid id, CancellationToken ct) => db.Teachers.SingleOrDefaultAsync(x => x.Id == id, ct);
+    public async Task<Teacher?> ReloadTeacherAsync(Guid id, CancellationToken ct)
+    {
+        foreach (var entry in db.ChangeTracker.Entries<Teacher>().Where(x => x.Entity.Id == id).ToList())
+            entry.State = EntityState.Detached;
+        return await FindTeacherAsync(id, ct);
+    }
     public async Task<IReadOnlyList<Teacher>> TeachersAsync(CancellationToken ct) =>
         await db.Teachers.AsNoTracking().OrderBy(x => x.FullName).ToListAsync(ct);
     public void AddClass(Class academicClass) => db.Classes.Add(academicClass);
@@ -26,6 +32,10 @@ internal sealed class AcademicStore(AcademicDbContext db) : IAcademicStore
     public async Task SaveAsync(CancellationToken ct)
     {
         try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new AcademicFailure(409, "Teacher snapshot changed concurrently.");
+        }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
             throw new AcademicFailure(409, "Academic data already exists.");

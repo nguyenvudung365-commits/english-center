@@ -35,6 +35,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IIdentityModuleInfo, IdentityModuleInfo>();
         services.AddScoped<IIdentityStore, IdentityStore>();
+        services.AddScoped<IStudentCodeGenerator, StudentCodeGenerator>();
         services.AddSingleton<IPasswordService, PasswordService>();
         services.AddScoped<ITokenService, TokenService>();
         services.AddSingleton(TimeProvider.System);

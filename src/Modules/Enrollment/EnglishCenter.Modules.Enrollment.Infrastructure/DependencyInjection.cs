@@ -26,6 +26,8 @@ public static class DependencyInjection
                 npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", EnrollmentSchema.Name)));
 
         services.AddSingleton<IEnrollmentModuleInfo, EnrollmentModuleInfo>();
+        services.AddScoped<EnglishCenter.Modules.Enrollment.Application.Enrollments.IEnrollmentStore, EnrollmentStore>();
+        services.AddHostedService<EnrollmentStartup>();
 
         return services;
     }

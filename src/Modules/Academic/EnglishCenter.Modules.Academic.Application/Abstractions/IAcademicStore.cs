@@ -11,6 +11,8 @@ public interface IAcademicStore
     Task<Course?> FindCourseAsync(Guid id, CancellationToken ct);
     Task<IReadOnlyList<Course>> CoursesAsync(CancellationToken ct);
     Task<Teacher?> FindTeacherAsync(Guid id, CancellationToken ct);
+    Task<Teacher?> ReloadTeacherAsync(Guid id, CancellationToken ct) =>
+        throw new NotSupportedException("The store must reload tracked teachers before retrying a snapshot conflict.");
     Task<IReadOnlyList<Teacher>> TeachersAsync(CancellationToken ct);
     void AddClass(Class academicClass);
     void AddTeacher(Teacher teacher);

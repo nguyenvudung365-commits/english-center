@@ -50,6 +50,8 @@ import {
     ManagerOnly,
 } from "./academic-pages";
 import { ErrorMessage, PageHeading, Unavailable } from "./ui";
+import { Assignments, AssignmentDetails, Enrollments } from "./assignment-pages";
+import { AccountCreate, ProfilePanel } from "./identity-pages";
 import "./styles.css";
 
 const labels = {
@@ -233,7 +235,8 @@ function Overview() {
     );
 }
 function Account({ onNotice }: { onNotice: (message: string) => void }) {
-    const user = identity(getSession())!;
+    const operation = useRef<AbortController | null>(null);
+    useEffect(() => () => operation.current?.abort(), []);
     const [current, setCurrent] = useState("");
     const [next, setNext] = useState("");
     const [confirm, setConfirm] = useState("");
@@ -246,20 +249,7 @@ function Account({ onNotice }: { onNotice: (message: string) => void }) {
                 subtitle="Bảo vệ không gian học tập của bạn."
             />
             <div className="account-grid">
-                <section className="panel">
-                    <UserRound className="accent" size={32} />
-                    <h2>Thông tin phiên</h2>
-                    <dl>
-                        <dt>Vai trò</dt>
-                        <dd>{labels[user.role]}</dd>
-                        <dt>Mã tài khoản</dt>
-                        <dd className="id">{user.id}</dd>
-                    </dl>
-                    <p className="muted small">
-                        Tên và email chưa được hiển thị vì hệ thống chưa có API
-                        hồ sơ cá nhân.
-                    </p>
-                </section>
+                <ProfilePanel />
                 <section className="panel">
                     <h2>Đổi mật khẩu</h2>
                     <p className="muted">
@@ -277,22 +267,27 @@ function Account({ onNotice }: { onNotice: (message: string) => void }) {
                                 return;
                             }
                             setBusy(true);
+                            const controller = new AbortController();
+                            operation.current = controller;
+                            const generation = getSessionGeneration();
                             try {
                                 await api("/identity/auth/change-password", {
                                     method: "POST",
+                                    signal: controller.signal,
                                     body: JSON.stringify({
                                         currentPassword: current,
                                         newPassword: next,
                                     }),
                                 });
+                                if (controller.signal.aborted || generation !== getSessionGeneration()) return;
                                 onNotice(
                                     "Đổi mật khẩu thành công. Vui lòng đăng nhập lại.",
                                 );
                                 setSession(null);
                             } catch (err) {
-                                setError(err);
+                                if (!controller.signal.aborted && generation === getSessionGeneration()) setError(err);
                             } finally {
-                                setBusy(false);
+                                if (!controller.signal.aborted && generation === getSessionGeneration()) setBusy(false);
                             }
                         }}
                     >
@@ -361,6 +356,7 @@ function navigation(role: import("./api").Role) {
                   { to: "/classes/new", label: "Tạo lớp học", icon: BookOpen },
                   { to: "/courses", label: "Khóa học", icon: BookOpen },
                   { to: "/teachers", label: "Giáo viên", icon: UserRound },
+                  { to: "/users/new", label: "Tạo tài khoản", icon: ShieldCheck },
               ]
             : []),
         ...(manager || role === "Student"
@@ -402,6 +398,9 @@ function navigation(role: import("./api").Role) {
                 "/classes/new",
                 "/courses",
                 "/teachers",
+                "/assignments",
+                "/users/new",
+                ...(manager ? ["/enrollment"] : []),
             ].includes(link.to) ||
             (link.to === "/classes" && !manager),
     }));
@@ -680,6 +679,7 @@ function App() {
                             path="/account"
                             element={<Account onNotice={setNotice} />}
                         />
+                        <Route path="/users/new" element={<AccountCreate />} />
                         <Route path="/classes" element={<Classes />} />
                         <Route
                             path="/classes/new"
@@ -713,12 +713,10 @@ function App() {
                                 </ManagerOnly>
                             }
                         />
-                        {[
-                            {
-                                path: "/enrollment",
-                                title: "Ghi danh & chuyển lớp",
-                                text: "Enrollment chưa có API tra cứu hoặc gửi ghi danh, chuyển lớp và hủy ghi danh. Trang này chưa thể gửi, lưu hay xác nhận yêu cầu. Vui lòng liên hệ giáo vụ.",
-                            },
+                         <Route path="/assignments" element={<Assignments />} />
+                         <Route path="/assignments/:id" element={<AssignmentDetails />} />
+                         <Route path="/enrollment" element={<Enrollments />} />
+                         {[
                             {
                                 path: "/invoices",
                                 title: "Hóa đơn & học phí",
@@ -728,11 +726,6 @@ function App() {
                                 path: "/attendance",
                                 title: "Điểm danh",
                                 text: "Academic chưa có API danh sách buổi học và ghi nhận điểm danh. Trang này chưa tải hoặc lưu trạng thái có mặt, vắng mặt; không có bản ghi minh họa.",
-                            },
-                            {
-                                path: "/assignments",
-                                title: "Bài tập",
-                                text: "Academic chưa có API giao bài, danh sách bài tập, nộp bài hoặc chấm điểm. Trang này chưa gửi hoặc lưu bài làm và không hiển thị bài tập giả lập.",
                             },
                             {
                                 path: "/schedule",
