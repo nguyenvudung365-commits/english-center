@@ -44,6 +44,24 @@ internal sealed class EnrollmentStore(EnrollmentDbContext db) : IEnrollmentStore
 
     public Task<Registration?> FindAsync(Guid id, CancellationToken ct) => db.Enrollments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
 
+    public Task<Registration?> FindAsync(Guid classId, Guid studentId, CancellationToken ct) =>
+        db.Enrollments.AsNoTracking().SingleOrDefaultAsync(x => x.ClassId == classId && x.StudentId == studentId, ct);
+
+    public async Task<IReadOnlyList<Registration>> ListAsync(Guid classId, CancellationToken ct) =>
+        await db.Enrollments.AsNoTracking().Where(x => x.ClassId == classId).OrderBy(x => x.Id).Take(200).ToListAsync(ct);
+
+    public async Task<Registration> SetActiveAsync(Guid id, bool active, CancellationToken ct)
+    {
+        var changed = await db.Enrollments.Where(x => x.Id == id && (!active || x.Status == "Active"))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.IsActive, active), ct);
+        if (changed == 0)
+        {
+            if (await FindAsync(id, ct) is null) throw new EnrollmentFailure(404, "Enrollment not found.");
+            throw new EnrollmentFailure(409, "Cancelled enrollment cannot grant coursework access.");
+        }
+        return (await FindAsync(id, ct))!;
+    }
+
     public async Task<Registration> EnrollAsync(EnrollRequest request, DateTime now, DateOnly today, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(ct);

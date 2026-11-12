@@ -1,0 +1,91 @@
+# Standalone local/test stack. Use INSTEAD of compose.yaml, never as its overlay.
+services:
+  api:
+    image: english-center-api:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=english_center;Username=english_center;Password=${POSTGRES_PASSWORD:?Phai cau hinh POSTGRES_PASSWORD}"
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?Phai cau hinh JWT_SIGNING_KEY}
+      Identity__InitializeDatabase: 'true'
+      Academic__InitializeDatabase: 'true'
+      Enrollment__InitializeDatabase: 'true'
+      Finance__InitializeDatabase: 'true'
+      MediaNotification__InitializeDatabase: 'true'
+      MediaNotification__Storage__Enabled: 'true'
+      MediaNotification__Storage__Endpoint: http://minio:9000
+      MediaNotification__Storage__PublicEndpoint: ${MEDIA_STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      MediaNotification__Storage__Bucket: ${MEDIA_STORAGE_BUCKET:-english-center-media}
+      MediaNotification__Storage__AccessKey: ${MEDIA_STORAGE_ACCESS_KEY:?Phai cau hinh MEDIA_STORAGE_ACCESS_KEY}
+      MediaNotification__Storage__SecretKey: ${MEDIA_STORAGE_SECRET_KEY:?Phai cau hinh MEDIA_STORAGE_SECRET_KEY}
+      MediaNotification__Storage__Region: ${MEDIA_STORAGE_REGION:-us-east-1}
+      MediaNotification__Storage__ForcePathStyle: 'true'
+      Identity__BootstrapAdmin__Email: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      Identity__BootstrapAdmin__FullName: ${BOOTSTRAP_ADMIN_NAME:-Administrator}
+      Identity__BootstrapAdmin__Password: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+    ports:
+      - "127.0.0.1:${API_PORT:-5080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: english_center
+      POSTGRES_USER: english_center
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Phai cau hinh POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  minio:
+    image: "coollabsio/minio:RELEASE.2025-04-22T22-12-26Z"
+    command: server /data --console-address ':9001'
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?Phai cau hinh MINIO_ROOT_USER}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?Phai cau hinh MINIO_ROOT_PASSWORD}"
+      MINIO_API_CORS_ALLOW_ORIGIN: ${MEDIA_STORAGE_CORS_ORIGINS:-http://localhost:8088}
+    ports:
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+  minio-init:
+    image: english-center-minio-client:2025-08-13
+    build:
+      context: .
+      dockerfile: deploy/minio-client.Dockerfile
+    restart: 'no'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Phai cau hinh MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Phai cau hinh MINIO_ROOT_PASSWORD}
+      MEDIA_STORAGE_BUCKET: ${MEDIA_STORAGE_BUCKET:-english-center-media}
+      MEDIA_STORAGE_ACCESS_KEY: ${MEDIA_STORAGE_ACCESS_KEY:?Phai cau hinh MEDIA_STORAGE_ACCESS_KEY}
+      MEDIA_STORAGE_SECRET_KEY: ${MEDIA_STORAGE_SECRET_KEY:?Phai cau hinh MEDIA_STORAGE_SECRET_KEY}
+    depends_on:
+      minio:
+        condition: service_started
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp
+
+volumes:
+  postgres-data:
+  minio-data:

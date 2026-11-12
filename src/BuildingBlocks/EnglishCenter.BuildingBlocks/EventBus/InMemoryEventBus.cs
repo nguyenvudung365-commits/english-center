@@ -5,7 +5,8 @@ namespace EnglishCenter.BuildingBlocks.EventBus;
 
 /// <summary>
 /// Event bus trong tiến trình. Mỗi lần publish dùng một DI scope mới, gọi tuần tự các handler,
-/// handler lỗi được log và không chặn handler còn lại. Không bền vững (xem rủi ro Outbox trong kế hoạch).
+/// Handler lỗi được log và không chặn handler còn lại; chế độ strict ném AggregateException sau khi gọi hết handler.
+/// Không bền vững (xem rủi ro Outbox trong kế hoạch).
 /// </summary>
 public sealed class InMemoryEventBus : IEventBus
 {
@@ -18,13 +19,15 @@ public sealed class InMemoryEventBus : IEventBus
         _logger = logger;
     }
 
-    public async Task PublishAsync<TEvent>(TEvent integrationEvent, CancellationToken cancellationToken = default)
+    public async Task PublishAsync<TEvent>(TEvent integrationEvent, CancellationToken cancellationToken = default,
+        bool throwOnHandlerFailure = false)
         where TEvent : IIntegrationEvent
     {
         ArgumentNullException.ThrowIfNull(integrationEvent);
 
         await using var scope = _scopeFactory.CreateAsyncScope();
         var handlers = scope.ServiceProvider.GetServices<IIntegrationEventHandler<TEvent>>();
+        List<Exception>? failures = null;
 
         foreach (var handler in handlers)
         {
@@ -44,7 +47,10 @@ public sealed class InMemoryEventBus : IEventBus
                     handler.GetType().FullName,
                     typeof(TEvent).Name,
                     integrationEvent.EventId);
+                if (throwOnHandlerFailure) (failures ??= []).Add(ex);
             }
         }
+
+        if (failures is not null) throw new AggregateException(failures);
     }
 }

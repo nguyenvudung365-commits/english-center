@@ -104,7 +104,8 @@ Các khối dữ liệu biểu diễn **schema riêng trong PostgreSQL**, không
 ├── Directory.Build.props
 ├── Directory.Packages.props        # Quản lý phiên bản NuGet tập trung
 ├── Dockerfile
-├── compose.yaml                    # API, PostgreSQL 17 và MinIO
+├── compose.yaml                    # API, PostgreSQL 17; storage R2 bên ngoài
+├── compose.minio.yaml              # Stack MinIO riêng, chỉ local/test
 ├── Jenkinsfile
 ├── .github/workflows/ci.yml
 ├── scripts/ci-smoke.sh
@@ -138,7 +139,7 @@ dotnet run --project src/Host/EnglishCenter.Api
 | http://localhost:5080/health | Kiểm tra host đang phục vụ yêu cầu |
 | http://localhost:5080/api/identity/ping | Kiểm tra đăng ký module Identity |
 
-Mặc định host không chạy migration lúc khởi động, nên Swagger và ping có thể hoạt động khi chưa cấu hình database. `/health` là kiểm tra hoạt động của host, **chưa kiểm tra kết nối PostgreSQL hay MinIO**. Endpoint nghiệp vụ cần database đã khởi tạo.
+Mặc định host không chạy migration lúc khởi động, nên Swagger và ping có thể hoạt động khi chưa cấu hình database. `/health` là kiểm tra hoạt động của host, **chưa kiểm tra kết nối PostgreSQL hay R2/S3**. Endpoint nghiệp vụ cần database đã khởi tạo.
 
 ### Khởi tạo Identity và admin
 
@@ -180,44 +181,47 @@ Development tự sinh signing key trong bộ nhớ nếu chưa có cấu hình. 
 
 ### Chạy bằng Docker Compose
 
-Tại thư mục gốc, sao chép mẫu cấu hình và điền các giá trị local:
+**Mặc định dùng Cloudflare R2**, không chạy MinIO. Tại thư mục gốc, nếu chưa có `.env`, sao chép mẫu rồi điền cấu hình thật (không ghi đè file đang dùng):
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Trong `.env`, cấu hình `POSTGRES_PASSWORD`, `JWT_SIGNING_KEY` (ít nhất 32 byte UTF-8), `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`. Nếu cần admin đầu tiên, đặt thêm `BOOTSTRAP_ADMIN_EMAIL` và `BOOTSTRAP_ADMIN_PASSWORD` (8–128 ký tự). Không commit file `.env` hoặc secret thật.
+Trong `.env`, cấu hình `POSTGRES_PASSWORD`, `JWT_SIGNING_KEY` (ít nhất 32 byte UTF-8), `MEDIA_STORAGE_ENDPOINT`, `MEDIA_STORAGE_PUBLIC_ENDPOINT`, `MEDIA_STORAGE_BUCKET` và cặp R2 **Access Key ID / Secret Access Key** qua `MEDIA_STORAGE_ACCESS_KEY`/`MEDIA_STORAGE_SECRET_KEY`. Hai endpoint dùng cùng S3 API HTTPS từ Cloudflare, ví dụ `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, **không thêm tên bucket**, không dùng domain website hoặc `r2.dev`. Region là `auto`. Token chỉ có Object Read & Write cho bucket cần dùng; không dùng Token value thay Secret Access Key. Bucket giữ private; CORS cấu hình trên Cloudflare, xem [hướng dẫn storage](docs/api/media-storage.md).
 
-**Lưu ý Academic:** `compose.yaml` hiện chỉ bật migration Identity. Để chạy các API Academic, tạo file override local `compose.academic.local.yaml` (không commit) với nội dung:
-
-```yaml
-services:
-  api:
-    environment:
-      Academic__InitializeDatabase: 'true'
-```
-
-Sau đó chạy toàn bộ stack:
+Nếu cần admin đầu tiên, đặt thêm `BOOTSTRAP_ADMIN_EMAIL` và `BOOTSTRAP_ADMIN_PASSWORD` (8–128 ký tự). Đây là mật khẩu website riêng, không phải mật khẩu email/VPS. Không commit `.env` hoặc secret thật. Cả hai stack Compose bật migration Identity, Academic, Enrollment, Finance và MediaNotification; không cần override Academic.
 
 ```bash
-docker compose -f compose.yaml -f compose.academic.local.yaml up -d --build
-docker compose -f compose.yaml -f compose.academic.local.yaml ps
+docker compose --env-file .env -f compose.yaml -f compose.web.yaml config --quiet
+docker compose --env-file .env -f compose.yaml -f compose.web.yaml up -d --build --wait
+docker compose --env-file .env -f compose.yaml -f compose.web.yaml ps
 ```
 
 - API health: `http://localhost:5080/health`; Compose chạy **Production nên không bật Swagger**.
-- MinIO API: `http://localhost:9000`; console: `http://localhost:9001`. Có container MinIO chưa đồng nghĩa nghiệp vụ upload/presigned URL đã được tích hợp.
-- PostgreSQL chỉ dùng mạng nội bộ Compose; API và MinIO mặc định bind vào `127.0.0.1`. Muốn truy cập từ ngoài cần cấu hình reverse proxy/TLS phù hợp.
-- Dữ liệu nằm trong volume `postgres-data` và `minio-data`. Dừng bằng `docker compose -f compose.yaml -f compose.academic.local.yaml down`; không thêm `--volumes` nếu cần giữ dữ liệu.
+- Web: `http://127.0.0.1:8088`, proxy `/api/` nội bộ. VPS dùng Caddy/HTTPS đến cổng này; Cloudflare Full (strict). Có thể bỏ overlay `compose.web.yaml` khi chỉ cần backend.
+- PostgreSQL chỉ dùng mạng nội bộ Compose; API/web bind `127.0.0.1`. R2 là dịch vụ bên ngoài, không có container/cổng MinIO. Health không thay thế kiểm chứng upload-confirm-download.
+- Database nằm trong volume `postgres-data`, file nằm ở bucket R2. Giữ nguyên project name khi cập nhật. Với VPS đã dùng `compose.vps.yaml`, project `english-center` và volume `english-center_postgres-data`, **không đổi lệnh triển khai hoặc tên project tùy tiện**. Bản sửa repo không tự cập nhật VPS, không chuyển file MinIO cũ sang R2.
+- Dừng bằng `docker compose --env-file .env -f compose.yaml -f compose.web.yaml down`; không thêm `--volumes` nếu cần giữ dữ liệu. Giữ nguyên mật khẩu database/JWT qua các lần deploy, sao lưu database trước khi thay cấu hình đang chạy.
+
+#### MinIO chỉ dành cho local/test
+
+Nếu chưa có R2, sao chép `.env.minio.example` thành `.env.minio` (chỉ khi file chưa tồn tại), điền secret mới dành riêng cho local, rồi chạy **file độc lập thay cho `compose.yaml`**, với project khác để không đụng database triển khai:
+
+```bash
+docker compose --env-file .env.minio --project-name english-center-local -f compose.minio.yaml -f compose.web.yaml up -d --build
+```
+
+MinIO API/console chỉ bind loopback `9000`/`9001`. API chờ `minio-init` tạo bucket private và user app theo prefix, không dùng root credentials. Nếu đổi `MINIO_PORT`, đổi `MEDIA_STORAGE_PUBLIC_ENDPOINT` tương ứng. Không dùng `compose.minio.yaml` làm overlay của bản R2; không dùng credentials hay database VPS cho test. Khi chạy song song phải đổi API/web/MinIO ports để tránh trùng.
 
 ### CI/CD và giới hạn kiểm chứng
 
 | Thành phần | Phạm vi cấu hình hiện có |
 |---|---|
 | GitHub Actions | PR vào `main`/`develop`, push vào hai nhánh và chạy thủ công; restore, build Release, test, lưu TRX, sau đó container smoke |
-| `scripts/ci-smoke.sh` | Stack tạm có PostgreSQL và MinIO; kiểm tra health, bootstrap admin, login, tạo Student, logout và refresh token bị thu hồi; dọn riêng stack/volume tạm khi kết thúc |
-| Jenkins | Agent Linux nhãn `dotnet10-docker`; build/test/smoke; build image trên `main`; chỉ deploy khi bật tham số `DEPLOY`, dùng credential file `english-center-deploy-env` |
+| `scripts/ci-smoke.sh` | Stack tạm qua `compose.minio.yaml`, không nạp `.env` triển khai; kiểm tra health, bootstrap admin, login, tạo Student, logout và refresh token bị thu hồi; dọn riêng stack/volume tạm khi kết thúc |
+| Jenkins | Agent Linux nhãn `dotnet10-docker`; build/test/smoke; build image; chỉ deploy R2 trên `main` khi bật `DEPLOY`, dùng credential file `english-center-deploy-env` theo `.env.example`; chạy trên Docker host của agent, không tự SSH tới VPS |
 
-Smoke script cần Bash, Docker Compose, `curl`, `jq` và `openssl`. Script hiện **chưa kiểm tra luồng Teacher → Academic → tạo/đọc lớp**, cũng chưa bật migration Academic trong Compose gốc. Có Jenkinsfile không chứng minh Jenkins/VPS/Cloudflare đã được cấu hình hoặc deploy thành công. Xem kết quả CI thực tế tại [GitHub Actions](https://github.com/nguyenvudung365-commits/english-center/actions).
+Smoke script cần Bash, Docker Compose, `curl`, `jq` và `openssl`. Kiểm tra cấu hình R2/MinIO cần thêm Python 3 nhưng không cần Docker daemon: `bash tests/scripts/compose-storage-tests.sh`; kiểm tra smoke runner bằng mock: `bash tests/scripts/ci-smoke-tests.sh`. Smoke hiện **chưa kiểm tra luồng Teacher → Academic → tạo/đọc lớp hay upload R2 thật**. Có Jenkinsfile không chứng minh Jenkins/VPS/Cloudflare đã được kết nối: **push GitHub chưa tự cập nhật VPS** nếu chưa cấu hình job/agent triển khai. Xem kết quả CI thực tế tại [GitHub Actions](https://github.com/nguyenvudung365-commits/english-center/actions).
 
 Tại commit `1cddae3`, [CI của PR #8](https://github.com/nguyenvudung365-commits/english-center/actions/runs/41798374475) đã hoàn tất thành công cả `build-and-test` và `container-smoke`. Kết quả smoke chỉ xác nhận phạm vi script mô tả ở trên; commit README mới sẽ kích hoạt lượt CI riêng.
 
@@ -283,6 +287,12 @@ Sau khi khởi tạo cả hai schema, đăng nhập Staff/Admin và thực hiệ
 
 **Đồng bộ lớp cũ sang Enrollment (TV3 tuần 3):** Staff/Admin gọi `POST /api/academic/classes/republish` (không body, 200 với `{ "published": N }`) để phát lại toàn bộ lớp, hoặc `POST /api/academic/classes/{id}/replay` (không body, 202; lớp không tồn tại trả 404) để phát lại một lớp. Chưa đăng nhập trả 401, Student/Teacher trả 403. Academic chỉ đọc schema của mình và phát `ClassCreated`; Enrollment dựng snapshot theo `ClassId`, không tạo trùng và không đặt lại sĩ số đang có. Phản hồi chỉ xác nhận phát sự kiện, cần kiểm tra luồng ghi danh/hóa đơn và log handler để xác nhận đồng bộ. Xem [hướng dẫn backfill và demo tuần 3](TV3_WEEK3.md#backfill-lớp-và-tài-khoản-đã-tồn-tại) để có lệnh PowerShell cụ thể.
 
+### Ghi danh và quyền truy cập bài tập
+
+`/api/enrollment/enrollments` là luồng ghi danh có kiểm tra sĩ số, học phí, giới hạn vi phạm và phát sự kiện tạo hóa đơn. `/api/enrollment/memberships` chỉ cấp/thu hồi quyền bài tập trên ghi danh còn hiệu lực đã có; không tự tạo ghi danh, hóa đơn hoặc thay đổi sĩ số. Thu hồi quyền bài tập không hủy ghi danh hay hóa đơn.
+
+Migration `UnifyEnrollmentMembership` hợp nhất quyền bài tập cũ vào bản ghi ghi danh. Sao lưu database trước khi cập nhật. Nếu có dữ liệu `class_enrollments` chưa có ghi danh tương ứng, migration chủ động dừng và giữ dữ liệu: cần giáo vụ đối soát, tạo ghi danh bằng luồng nghiệp vụ với học phí/giới hạn đã duyệt, kiểm tra sĩ số và phát lại sự kiện còn thiếu trước khi chạy lại. Không tự biến quyền bài tập cũ thành nghĩa vụ học phí. Migration này không hỗ trợ rollback tự động; khôi phục bản sao lưu nếu cần trở về trước khi hợp nhất.
+
 ## Kiểm thử
 
 ```bash
@@ -294,15 +304,26 @@ dotnet test EnglishCenter.sln -c Release
 | ArchitectureTests | Ranh giới module, dependency và ProjectReference |
 | BuildingBlocks.Tests | Event Bus, DI scope và hành vi xử lý handler |
 | Academic.Tests | Domain/Application tạo lớp, validation và handler đồng bộ giáo viên |
-| IntegrationTests | Host, ping, schema, Identity/Academic qua HTTP và chống ghi nhận trùng EnrollmentId trong recorder Finance |
+| IntegrationTests | Host, ping, schema, Identity/Academic qua HTTP; Media validation/quyền sở hữu/immutable file; chống ghi nhận trùng EnrollmentId trong recorder Finance |
 
 Auth test dùng SQLite trong bộ nhớ và không yêu cầu PostgreSQL ngoài. Kiểm tra SQL migration không thay thế việc chạy migration, constraint và luồng nghiệp vụ trên PostgreSQL thật.
 
 Kiểm chứng PostgreSQL: đặt biến môi trường `ENGLISHCENTER_TEST_POSTGRES` là chuỗi kết nối tới server PostgreSQL có quyền tạo database; test tự tạo database tạm và xóa khi xong. Chạy bằng:
 
 ```bash
-dotnet test tests/EnglishCenter.IntegrationTests --filter IdentityPostgresTests
+dotnet test tests/EnglishCenter.IntegrationTests --filter "FullyQualifiedName~IdentityPostgresTests|FullyQualifiedName~MediaFilePostgresTests"
 ```
+
+Để chạy tự động trên PostgreSQL 17 cô lập (Bash, Docker daemon đang chạy, .NET 10 và OpenSSL):
+
+```bash
+bash tests/scripts/ci-postgres-tests.sh  # Kiểm tra runner bằng mock, không chạy database thật
+bash scripts/ci-postgres.sh             # Chạy 4 Identity + 2 Media trên PostgreSQL thật
+```
+
+Runner sinh mật khẩu riêng, mở cổng PostgreSQL ngẫu nhiên chỉ trên loopback, chờ database sẵn sàng rồi chạy bộ test Identity và Media (migration riêng, CAS revision đồng thời, chặn owner khác). Runner yêu cầu TRX có ít nhất 6 test đã chạy, tất cả đạt và không bỏ qua; lỗi test, thiếu báo cáo hoặc database không sẵn sàng đều làm bước CI thất bại. Container và volume tạm được dọn sau khi chạy; không sử dụng database hay credential triển khai. Báo cáo thật được lưu dưới `TestResults/Postgres/<run-id>/`. Mock chạy trong thư mục tạm riêng, không tạo bằng chứng PostgreSQL giả trong `TestResults`.
+
+Jenkins có bước **Identity và Media trên PostgreSQL thật** riêng bên cạnh test thường và smoke Compose. Compose hiện bật migration Identity, Academic và MediaNotification khi API khởi động. Việc thêm bước CI không có nghĩa bước đó đã chạy đạt: nếu Docker daemon chưa chạy, runner sẽ báo lỗi ngay. API cấp presigned URL của MediaNotification được mô tả trong phần TV4 bên dưới.
 
 Kết quả local sau khi tích hợp `develop`, tại commit `1cddae3`, bằng `dotnet test EnglishCenter.sln --nologo`:
 
@@ -343,3 +364,13 @@ Identity, US-07, test TV3 tuần 1–2 và cấu hình CI/CD đã có trên `dev
 **Nhóm 10 · Môn 608819 · Phát triển ứng dụng phía máy chủ nâng cao**
 
 Mã nguồn được quản lý tại repository này. Tài liệu báo cáo và phân công chi tiết lưu riêng trên Google Drive của nhóm.
+
+## Bổ sung TV4 tuần 3 — lưu file MediaNotification
+
+Lát cắt hiện tại bổ sung ba API Bearer owner-only: `POST /api/media-notification/files/presign`, `POST /api/media-notification/files/{fileId}/confirm`, `GET /api/media-notification/files/{fileId}/download`. Không bao gồm thông báo tuần 4 hay nghiệp vụ nộp bài Academic.
+
+Compose gốc bật migration Identity, Academic **và MediaNotification**, mặc định kết nối R2 theo `.env.example`; bucket private và CORS phải cấu hình trên Cloudflare. MinIO chỉ còn trong `compose.minio.yaml` cho local/test: init client build từ commit upstream được pin, tạo bucket private và policy theo prefix; API không dùng root MinIO. Không tự nhận upload R2 đã chạy đạt chỉ vì Compose config hợp lệ hoặc container healthy.
+
+Xem [hợp đồng lưu file, cấu hình bucket và luồng upload thật](docs/api/media-storage.md) để có ma trận extension/MIME, giới hạn 20 MiB, expiry 5 phút, ProblemDetails, concurrency/anti-replay và lệnh kiểm chứng PowerShell. Kiểm tra định dạng **không phải quét malware**; URL đã ký là bearer capability có thể bị chia sẻ. Các số liệu test cũ ở trên vẫn là lịch sử, không phải kết quả kiểm chứng của phần bổ sung này.
+
+**Chưa đủ điều kiện mở public:** giới hạn 20 MiB được kiểm tra khi xác nhận, không phải hạn mức ingress cho PUT staging. Trước khi public cần giới hạn upload ở tầng storage/proxy, quota và số ticket theo người dùng, giới hạn số confirm đồng thời, cùng lifecycle chỉ cho `staging/`. Chưa có background garbage collector; không đặt expiry cho toàn bộ `files/` đang được metadata tham chiếu.

@@ -88,6 +88,12 @@ namespace EnglishCenter.Modules.Enrollment.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("enrolled_at");
 
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
                     b.Property<int>("LateCount")
                         .HasColumnType("integer")
                         .HasColumnName("late_count");
