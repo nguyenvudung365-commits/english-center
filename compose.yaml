@@ -1,3 +1,4 @@
+# Default deployment: external private R2 bucket, provisioned outside Compose.
 services:
   api:
     image: english-center-api:${IMAGE_TAG:-local}
@@ -10,6 +11,17 @@ services:
       ConnectionStrings__Default: "Host=postgres;Port=5432;Database=english_center;Username=english_center;Password=${POSTGRES_PASSWORD:?Phai cau hinh POSTGRES_PASSWORD}"
       Jwt__SigningKey: ${JWT_SIGNING_KEY:?Phai cau hinh JWT_SIGNING_KEY}
       Identity__InitializeDatabase: 'true'
+      Academic__InitializeDatabase: 'true'
+      Enrollment__InitializeDatabase: 'true'
+      MediaNotification__InitializeDatabase: 'true'
+      MediaNotification__Storage__Enabled: 'true'
+      MediaNotification__Storage__Endpoint: ${MEDIA_STORAGE_ENDPOINT:?Phai cau hinh MEDIA_STORAGE_ENDPOINT}
+      MediaNotification__Storage__PublicEndpoint: ${MEDIA_STORAGE_PUBLIC_ENDPOINT:?Phai cau hinh MEDIA_STORAGE_PUBLIC_ENDPOINT}
+      MediaNotification__Storage__Bucket: ${MEDIA_STORAGE_BUCKET:?Phai cau hinh MEDIA_STORAGE_BUCKET}
+      MediaNotification__Storage__AccessKey: ${MEDIA_STORAGE_ACCESS_KEY:?Phai cau hinh MEDIA_STORAGE_ACCESS_KEY}
+      MediaNotification__Storage__SecretKey: ${MEDIA_STORAGE_SECRET_KEY:?Phai cau hinh MEDIA_STORAGE_SECRET_KEY}
+      MediaNotification__Storage__Region: ${MEDIA_STORAGE_REGION:-auto}
+      MediaNotification__Storage__ForcePathStyle: 'true'
       Identity__BootstrapAdmin__Email: ${BOOTSTRAP_ADMIN_EMAIL:-}
       Identity__BootstrapAdmin__FullName: ${BOOTSTRAP_ADMIN_NAME:-Administrator}
       Identity__BootstrapAdmin__Password: ${BOOTSTRAP_ADMIN_PASSWORD:-}
@@ -37,19 +49,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-  minio:
-    image: "coollabsio/minio:RELEASE.2025-04-22T22-12-26Z"
-    command: server /data --console-address ':9001'
-    restart: unless-stopped
-    environment:
-      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?Phai cau hinh MINIO_ROOT_USER}"
-      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?Phai cau hinh MINIO_ROOT_PASSWORD}"
-    ports:
-      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
-      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
-    volumes:
-      - minio-data:/data
 
 volumes:
   postgres-data:
-  minio-data:

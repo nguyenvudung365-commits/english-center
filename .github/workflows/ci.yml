@@ -47,5 +47,9 @@ jobs:
     steps:
       - name: Lấy mã nguồn
         uses: actions/checkout@v4
+      - name: Kiểm tra cấu hình R2 và MinIO local, smoke runner bằng mock
+        run: |
+          bash tests/scripts/compose-storage-tests.sh
+          bash tests/scripts/ci-smoke-tests.sh
       - name: Build image và kiểm tra PostgreSQL, Identity, MinIO
         run: bash scripts/ci-smoke.sh
