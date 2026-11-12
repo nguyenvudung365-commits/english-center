@@ -23,6 +23,122 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.Assignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("class_id");
+
+                    b.Property<DateTimeOffset>("ClosesAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("closes_at_utc");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(5000)
+                        .HasColumnType("character varying(5000)")
+                        .HasColumnName("description");
+
+                    b.Property<DateTimeOffset>("OpensAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("opens_at_utc");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("title");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.ToTable("assignments", "academic", t =>
+                        {
+                            t.HasCheckConstraint("ck_assignments_window", "closes_at_utc > opens_at_utc");
+                        });
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.Submission", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AssignmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("assignment_id");
+
+                    b.Property<DateTimeOffset?>("GradedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("graded_at");
+
+                    b.Property<Guid>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid")
+                        .HasColumnName("revision");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("student_id");
+
+                    b.Property<DateTimeOffset>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("submitted_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignmentId", "StudentId")
+                        .IsUnique();
+
+                    b.ToTable("submissions", "academic");
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.SubmissionFile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("content_type");
+
+                    b.Property<Guid>("FileId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("file_id");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("file_name");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("size_bytes");
+
+                    b.Property<Guid>("SubmissionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("submission_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubmissionId", "FileId")
+                        .IsUnique();
+
+                    b.ToTable("submission_files", "academic", t =>
+                        {
+                            t.HasCheckConstraint("ck_submission_files_size", "size_bytes > 0 AND size_bytes <= 20971520");
+                        });
+                });
+
             modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Classes.Class", b =>
                 {
                     b.Property<Guid>("Id")
@@ -93,6 +209,31 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_classes_tuition_fee_non_negative", "tuition_fee >= 0");
                         });
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Classes.ClassStudent", b =>
+                {
+                    b.Property<Guid>("EnrollmentId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("enrollment_id");
+
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("class_id");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("student_id");
+
+                    b.HasKey("EnrollmentId");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("StudentId", "ClassId")
+                        .IsUnique();
+
+                    b.ToTable("class_students", "academic");
                 });
 
             modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Courses.Course", b =>
@@ -166,9 +307,43 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("full_name");
 
+                    b.Property<long>("ProfileVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L)
+                        .HasColumnName("profile_version");
+
                     b.HasKey("Id");
 
                     b.ToTable("teachers", "academic");
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.Assignment", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Classes.Class", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.Submission", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Assignments.Assignment", null)
+                        .WithMany()
+                        .HasForeignKey("AssignmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.SubmissionFile", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Assignments.Submission", null)
+                        .WithMany("Files")
+                        .HasForeignKey("SubmissionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Classes.Class", b =>
@@ -182,6 +357,20 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                     b.HasOne("EnglishCenter.Modules.Academic.Domain.Teachers.Teacher", null)
                         .WithMany()
                         .HasForeignKey("TeacherId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.Submission", b =>
+                {
+                    b.Navigation("Files");
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Classes.ClassStudent", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Classes.Class", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

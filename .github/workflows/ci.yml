@@ -19,6 +19,19 @@ jobs:
     name: build-and-test
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: ci-test-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Lấy mã nguồn
         uses: actions/checkout@v4
@@ -31,6 +44,9 @@ jobs:
       - name: Biên dịch
         run: dotnet build EnglishCenter.sln -c Release --no-restore
       - name: Chạy kiểm thử
+        env:
+          TV3_POSTGRES: Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=ci-test-only
+          ENGLISHCENTER_TEST_POSTGRES: Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=ci-test-only
         run: dotnet test EnglishCenter.sln -c Release --no-build --logger trx --results-directory TestResults
       - name: Lưu kết quả kiểm thử
         if: always()
@@ -47,5 +63,9 @@ jobs:
     steps:
       - name: Lấy mã nguồn
         uses: actions/checkout@v4
+      - name: Kiểm tra cấu hình R2 và MinIO local, smoke runner bằng mock
+        run: |
+          bash tests/scripts/compose-storage-tests.sh
+          bash tests/scripts/ci-smoke-tests.sh
       - name: Build image và kiểm tra PostgreSQL, Identity, MinIO
         run: bash scripts/ci-smoke.sh

@@ -18,3 +18,5 @@ lms-tiw-anh-chup
 **/appsettings.*.local.json
 AGENTS.md
 CLAUDE.md
+**/node_modules
+**/dist

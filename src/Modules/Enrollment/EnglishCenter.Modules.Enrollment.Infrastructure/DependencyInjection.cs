@@ -3,6 +3,8 @@ using EnglishCenter.Modules.Enrollment.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using EnglishCenter.Modules.Enrollment.Application.Registrations;
 
 namespace EnglishCenter.Modules.Enrollment.Infrastructure;
 
@@ -26,6 +28,9 @@ public static class DependencyInjection
                 npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", EnrollmentSchema.Name)));
 
         services.AddSingleton<IEnrollmentModuleInfo, EnrollmentModuleInfo>();
+        services.AddScoped<IEnrollmentStore, EnrollmentStore>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddHostedService<EnrollmentStartup>();
 
         return services;
     }

@@ -18,7 +18,7 @@ public sealed class UserSyncService(IIdentityStore store, IEventBus events, ILog
                 new Dictionary<string, string[]> { [nameof(request.Role)] = ["Role is not valid."] });
         var users = await store.UsersAsync(role, ct);
         foreach (var user in users)
-            await events.PublishAsync(new UserRegisteredIntegrationEvent(user.Id, user.Email, user.FullName, user.Role), ct);
+            await events.PublishAsync(new UserRegisteredIntegrationEvent(user.Id, user.Email, user.FullName, user.Role, user.ProfileVersion), ct);
         logger.LogInformation("Republished {Count} user registration events (role filter: {Role}).", users.Count, role ?? "all");
         return new RepublishUsersResponse(users.Count, role);
     }

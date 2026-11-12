@@ -34,6 +34,19 @@ public sealed class ClassesController(ClassService classes) : ControllerBase
     [ProducesResponseType<ClassResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public Task<ClassResponse> Get(Guid id, CancellationToken ct) => classes.GetAsync(id, ct);
+
+    [HttpPost("{id:guid}/replay")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Replay(Guid id, CancellationToken ct)
+    {
+        await classes.ReplayAsync(id, ct);
+        return Accepted();
+    }
+
+    [HttpPost("republish")]
+    [ProducesResponseType<RepublishClassesResponse>(StatusCodes.Status200OK)]
+    public Task<RepublishClassesResponse> Republish(CancellationToken ct) => classes.RepublishAsync(ct);
 }
 
 // Danh mục để giáo vụ chọn courseId/teacherId khi tạo lớp.

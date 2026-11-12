@@ -126,6 +126,63 @@ public class InMemoryEventBusTests
     }
 
     [Fact]
+    public async Task RequiredPublication_CollectsFailures_AndStillRunsFollowingHandlers()
+    {
+        var (bus, log) = Build(s =>
+        {
+            s.AddIntegrationEventHandler<TestEvent, ThrowingHandler>();
+            s.AddIntegrationEventHandler<TestEvent, SecondHandler>();
+            s.AddScoped<IIntegrationEventHandler<TestEvent>, ThrowingHandler>();
+            s.AddIntegrationEventHandler<TestEvent, FirstHandler>();
+        });
+
+        var failure = await Assert.ThrowsAsync<AggregateException>(() =>
+            bus.PublishAsync(new TestEvent("required"), throwOnHandlerFailure: true));
+
+        Assert.Equal(new[] { "throwing", "second", "throwing", "first" }, log.Calls);
+        Assert.Equal(2, failure.InnerExceptions.Count);
+        Assert.All(failure.InnerExceptions, exception =>
+        {
+            Assert.IsType<InvalidOperationException>(exception);
+            Assert.Equal("boom", exception.Message);
+        });
+    }
+
+    [Fact]
+    public async Task RequiredPublication_WithoutHandlersOrFailures_CompletesNormally()
+    {
+        var (emptyBus, _) = Build(_ => { });
+        await emptyBus.PublishAsync(new TestEvent("empty"), throwOnHandlerFailure: true);
+        var (bus, log) = Build(s => s.AddIntegrationEventHandler<TestEvent, FirstHandler>());
+        using var cancellation = new CancellationTokenSource();
+
+        await bus.PublishAsync(new TestEvent("success"), cancellation.Token, throwOnHandlerFailure: true);
+
+        Assert.Equal("first", Assert.Single(log.Calls));
+        Assert.Equal(cancellation.Token, log.LastToken);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Publication_CancellationPropagatesWithoutAggregation_AndStopsLaterHandlers(bool required)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var (bus, log) = Build(s =>
+        {
+            s.AddIntegrationEventHandler<TestEvent, ThrowingHandler>();
+            s.AddScoped<IIntegrationEventHandler<TestEvent>>(sp => new CancelDuringPublication(sp.GetRequiredService<CallLog>(), cancellation));
+            s.AddIntegrationEventHandler<TestEvent, SecondHandler>();
+        });
+
+        var failure = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            bus.PublishAsync(new TestEvent("cancel"), cancellation.Token, throwOnHandlerFailure: required));
+
+        Assert.Equal(cancellation.Token, failure.CancellationToken);
+        Assert.Equal(new[] { "throwing", "canceling" }, log.Calls);
+    }
+
+    [Fact]
     public async Task E4_CanceledToken_AndHandlerThrowsOce_PublishRethrows()
     {
         var (bus, log) = Build(s =>
@@ -210,6 +267,18 @@ public class InMemoryEventBusTests
         var services = new ServiceCollection().AddIntegrationEventHandler<TestEvent, SecondHandler>();
         var d = Assert.Single(services, x => x.ServiceType == typeof(IIntegrationEventHandler<TestEvent>));
         Assert.Equal(ServiceLifetime.Scoped, d.Lifetime);
+    }
+}
+
+internal sealed class CancelDuringPublication(CallLog log, CancellationTokenSource cancellation)
+    : IIntegrationEventHandler<TestEvent>
+{
+    public Task HandleAsync(TestEvent integrationEvent, CancellationToken ct = default)
+    {
+        log.Calls.Add("canceling");
+        cancellation.Cancel();
+        ct.ThrowIfCancellationRequested();
+        return Task.CompletedTask;
     }
 }
 

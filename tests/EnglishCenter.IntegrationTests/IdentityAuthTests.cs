@@ -481,11 +481,23 @@ public sealed class IdentityAuthTests : IAsyncLifetime
                 services.RemoveAll<DbContextOptions<IdentityDbContext>>();
                 services.RemoveAll<IDbContextOptionsConfiguration<IdentityDbContext>>();
                 services.AddDbContext<IdentityDbContext>(o => o.UseSqlite(_connection));
+                services.RemoveAll<IStudentCodeGenerator>();
+                services.AddSingleton<IStudentCodeGenerator, TestStudentCodes>();
                 services.AddSingleton<IIntegrationEventHandler<UserRegisteredIntegrationEvent>>(Registered);
             });
         }
 
         public override async ValueTask DisposeAsync() { await base.DisposeAsync(); await _connection.DisposeAsync(); }
+    }
+
+    private sealed class TestStudentCodes : IStudentCodeGenerator
+    {
+        private int sequence;
+        public Task<string> AllocateAsync(DateTimeOffset createdAt, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult($"HV{Interlocked.Increment(ref sequence):D6}-{createdAt.UtcDateTime:yy}");
+        }
     }
 
     private sealed class RegistrationRecorder : IIntegrationEventHandler<UserRegisteredIntegrationEvent>

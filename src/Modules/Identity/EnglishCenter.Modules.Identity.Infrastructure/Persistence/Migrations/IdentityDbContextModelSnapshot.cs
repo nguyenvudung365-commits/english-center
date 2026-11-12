@@ -23,6 +23,10 @@ namespace EnglishCenter.Modules.Identity.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.HasSequence<long>("student_code_sequence", "identity")
+                .HasMin(1L)
+                .HasMax(999999L);
+
             modelBuilder.Entity("EnglishCenter.Modules.Identity.Domain.Users.RefreshSession", b =>
                 {
                     b.Property<Guid>("Id")
@@ -63,6 +67,9 @@ namespace EnglishCenter.Modules.Identity.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("AvatarFileId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Email")
                         .IsRequired()
                         .HasMaxLength(254)
@@ -86,6 +93,20 @@ namespace EnglishCenter.Modules.Identity.Infrastructure.Persistence.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
 
+                    b.Property<string>("Phone")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<long>("ProfileVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<string>("StudentCode")
+                        .HasMaxLength(11)
+                        .HasColumnType("character varying(11)");
+
                     b.Property<Guid>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("uuid");
@@ -100,7 +121,12 @@ namespace EnglishCenter.Modules.Identity.Infrastructure.Persistence.Migrations
                     b.HasIndex("NormalizedEmail")
                         .IsUnique();
 
-                    b.ToTable("users", "identity");
+                    b.HasIndex("StudentCode")
+                        .IsUnique()
+                        .HasFilter("\"StudentCode\" IS NOT NULL");
+
+                    b.ToTable("users", "identity", t => t.HasCheckConstraint("ck_users_student_code",
+                        "(\"Role\" = 'Student' AND \"StudentCode\" IS NOT NULL AND \"StudentCode\" ~ '^HV[0-9]{6}-[0-9]{2}$' AND substring(\"StudentCode\" from 3 for 6) <> '000000' AND right(\"StudentCode\", 2) = to_char(\"CreatedAt\" AT TIME ZONE 'UTC', 'YY')) OR (\"Role\" <> 'Student' AND \"StudentCode\" IS NULL)"));
                 });
 
             modelBuilder.Entity("EnglishCenter.Modules.Identity.Domain.Users.RefreshSession", b =>
