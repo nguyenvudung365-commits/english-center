@@ -11,6 +11,8 @@ public sealed class AcademicDbContext : DbContext
     public DbSet<Course> Courses => Set<Course>();
     public DbSet<Teacher> Teachers => Set<Teacher>();
     public DbSet<Class> Classes => Set<Class>();
+    public DbSet<EnglishCenter.Modules.Academic.Domain.Assignments.Assignment> Assignments => Set<EnglishCenter.Modules.Academic.Domain.Assignments.Assignment>();
+    public DbSet<EnglishCenter.Modules.Academic.Domain.Assignments.Submission> Submissions => Set<EnglishCenter.Modules.Academic.Domain.Assignments.Submission>();
     public DbSet<ClassStudent> ClassStudents => Set<ClassStudent>();
 
     public AcademicDbContext(DbContextOptions<AcademicDbContext> options) : base(options)

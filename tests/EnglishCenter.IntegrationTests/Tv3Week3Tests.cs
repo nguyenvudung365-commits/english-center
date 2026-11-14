@@ -7,7 +7,9 @@ using EnglishCenter.BuildingBlocks.Security;
 using EnglishCenter.Modules.Academic.Application.Classes;
 using EnglishCenter.Modules.Academic.Infrastructure.Persistence;
 using EnglishCenter.Modules.Enrollment.Application.Registrations;
+using EnglishCenter.Modules.Enrollment.Contracts;
 using EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents;
+using EnglishCenter.Modules.Enrollment.Domain.Registrations;
 using EnglishCenter.Modules.Enrollment.Infrastructure.Persistence;
 using EnglishCenter.Modules.Finance.Application.Abstractions;
 using EnglishCenter.Modules.Finance.Contracts.IntegrationEvents;
@@ -103,6 +105,8 @@ public sealed partial class Tv3Week3Tests : IAsyncLifetime
             Assert.Single(await scope.ServiceProvider.GetRequiredService<FinanceDbContext>().Invoices.ToListAsync());
             Assert.Single(await scope.ServiceProvider.GetRequiredService<AcademicDbContext>().ClassStudents.ToListAsync());
             Assert.Equal(1, (await scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>().Classes.SingleAsync()).CurrentStudents);
+            Assert.Equal(value.Id, (await scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>().Enrollments.SingleAsync()).Id);
+            Assert.True(await scope.ServiceProvider.GetRequiredService<IEnrollmentAccess>().IsActiveAsync(_class, _student, default));
         }
         await Login("Student");
         Assert.Equal(invoice, await GetInvoice(value.Id));
@@ -112,6 +116,184 @@ public sealed partial class Tv3Week3Tests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, (await _client.GetAsync($"{Url}/{value.Id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await _client.GetAsync($"/api/finance/invoices/by-enrollment/{value.Id}")).StatusCode);
         Assert.Empty((await _client.GetFromJsonAsync<List<StudentClassResponse>>("/api/academic/classes/mine"))!);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RegistrationOnly_AuthorizesAssignments_AndRevocationAppliesWithoutEvents(bool cancelFinancial)
+    {
+        await Login("Teacher");
+        var now = DateTimeOffset.UtcNow;
+        var created = await _client.PostAsJsonAsync("/api/academic/assignments", new
+        {
+            classId = _class, title = "Registration-backed access",
+            opensAtUtc = now.AddHours(-1), closesAtUtc = now.AddHours(1)
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var assignment = (await created.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/academic/assignments/{assignment}";
+        await Login("Student");
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.GetAsync(path)).StatusCode);
+
+        var registration = new Registration(_student, _class, 4_500_000m, DateTime.UtcNow, 3, 5, 2);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+            Assert.DoesNotContain(db.Model.GetEntityTypes(), entity => entity.ClrType.Name == "ClassEnrollment");
+            db.Enrollments.Add(registration);
+            await db.SaveChangesAsync();
+        }
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var access = scope.ServiceProvider.GetRequiredService<IEnrollmentAccess>();
+            Assert.True(await access.IsActiveAsync(_class, _student, default));
+            Assert.False(await access.IsActiveAsync(_class, _other, default));
+            Assert.False(await access.IsActiveAsync(Guid.NewGuid(), _student, default));
+            Assert.Empty(await scope.ServiceProvider.GetRequiredService<AcademicDbContext>().ClassStudents.ToListAsync());
+            Assert.Empty(await scope.ServiceProvider.GetRequiredService<FinanceDbContext>().Invoices.ToListAsync());
+        }
+        Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync(path)).StatusCode);
+        Assert.Single((await _client.GetFromJsonAsync<System.Text.Json.JsonElement[]>($"/api/academic/assignments?classId={_class}"))!);
+        Assert.Equal(HttpStatusCode.NotFound, (await _client.GetAsync(path + "/submissions/mine")).StatusCode);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+            var stored = await db.Enrollments.SingleAsync();
+            Assert.Equal(registration.Id, stored.Id);
+            if (cancelFinancial) db.Entry(stored).Property(x => x.Status).CurrentValue = "Cancelled";
+            else db.Entry(stored).Property(x => x.IsActive).CurrentValue = false;
+            await db.SaveChangesAsync();
+        }
+        using (var scope = _factory.Services.CreateScope())
+            Assert.False(await scope.ServiceProvider.GetRequiredService<IEnrollmentAccess>().IsActiveAsync(_class, _student, default));
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.GetAsync($"/api/academic/assignments?classId={_class}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.GetAsync(path + "/submissions/mine")).StatusCode);
+        Assert.Empty(_factory.EnrollmentEvents);
+        Assert.Empty(_factory.Invoices);
+    }
+
+    [Fact]
+    public async Task Memberships_GrantAndRevokeCourseworkOnly_PreserveFinancialRegistrationCapacityInvoiceAndEvents()
+    {
+        _class = await CreateClass(1);
+        var enrolled = await Enroll();
+        Assert.Equal(HttpStatusCode.Created, enrolled.StatusCode);
+        var registration = (await enrolled.Content.ReadFromJsonAsync<EnrollmentResponse>())!;
+        var invoice = await GetInvoice(registration.Id);
+        const string memberships = "/api/enrollment/memberships";
+        var listed = Assert.Single((await _client.GetFromJsonAsync<System.Text.Json.JsonElement[]>($"{memberships}?classId={_class}"))!);
+        Assert.All(new[] { "classId", "id", "isActive", "studentId" }, name => Assert.True(listed.TryGetProperty(name, out _)));
+        Assert.Equal(registration.Id, listed.GetProperty("id").GetGuid());
+        Assert.Equal(_class, listed.GetProperty("classId").GetGuid());
+        Assert.Equal(_student, listed.GetProperty("studentId").GetGuid());
+        Assert.True(listed.GetProperty("isActive").GetBoolean());
+
+        async Task ReuseMembership()
+        {
+            var response = await _client.PostAsJsonAsync(memberships, new { classId = _class, studentId = _student });
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var member = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            Assert.Equal(registration.Id, member.GetProperty("id").GetGuid());
+            Assert.True(member.GetProperty("isActive").GetBoolean());
+        }
+
+        async Task AssertCanonicalState(bool active)
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+            var stored = Assert.Single(await db.Enrollments.ToListAsync());
+            Assert.Equal(registration.Id, stored.Id);
+            Assert.Equal("Active", stored.Status);
+            Assert.Equal(active, stored.IsActive);
+            Assert.Equal((3, 5, 2), (stored.MaxAbsences, stored.MaxLates, stored.MaxSkippedAssignments));
+            Assert.Equal(4_500_000m, stored.TuitionFee);
+            Assert.Equal(1, (await db.Classes.SingleAsync(x => x.ClassId == _class)).CurrentStudents);
+            Assert.Equal(active, await scope.ServiceProvider.GetRequiredService<IEnrollmentAccess>().IsActiveAsync(_class, _student, default));
+            Assert.Equal(invoice.Id, (await scope.ServiceProvider.GetRequiredService<FinanceDbContext>().Invoices.SingleAsync()).Id);
+            Assert.Equal(registration.Id, Assert.Single(_factory.EnrollmentEvents).EnrollmentId);
+            Assert.Single(_factory.Invoices);
+        }
+
+        await ReuseMembership();
+        await AssertCanonicalState(true);
+        Assert.Equal(HttpStatusCode.Conflict, (await Enroll()).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await _client.PostAsJsonAsync(memberships, new { classId = _class, studentId = _other })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await _client.DeleteAsync($"{memberships}/{registration.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await _client.DeleteAsync($"{memberships}/{registration.Id}")).StatusCode);
+        await AssertCanonicalState(false);
+        await ReuseMembership();
+        await AssertCanonicalState(true);
+        Assert.Equal(invoice, await GetInvoice(registration.Id));
+        Assert.Single(_factory.Invoices);
+    }
+
+    [Fact]
+    public async Task Memberships_WithoutFinancialRegistration_RejectGrantWithoutCreatingRegistrationInvoiceOrEvents()
+    {
+        const string memberships = "/api/enrollment/memberships";
+        Assert.Equal(HttpStatusCode.Conflict, (await _client.PostAsJsonAsync(memberships,
+            new { classId = _class, studentId = _student })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await _client.PostAsJsonAsync(memberships, Request())).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.PostAsJsonAsync(Url,
+            new { classId = _class, studentId = _student })).StatusCode);
+        Assert.Empty((await _client.GetFromJsonAsync<System.Text.Json.JsonElement[]>($"{memberships}?classId={_class}"))!);
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+        Assert.Empty(await db.Enrollments.ToListAsync());
+        Assert.Equal(0, (await db.Classes.SingleAsync()).CurrentStudents);
+        Assert.False(await scope.ServiceProvider.GetRequiredService<IEnrollmentAccess>().IsActiveAsync(_class, _student, default));
+        Assert.Empty(await scope.ServiceProvider.GetRequiredService<FinanceDbContext>().Invoices.ToListAsync());
+        Assert.Empty(_factory.EnrollmentEvents);
+        Assert.Empty(_factory.Invoices);
+    }
+
+    [Theory]
+    [InlineData("POST")]
+    [InlineData("PATCH")]
+    public async Task Memberships_CancelledFinancialRegistration_RejectsCourseworkReactivationWithoutSideEffects(string method)
+    {
+        var enrolled = await Enroll();
+        Assert.Equal(HttpStatusCode.Created, enrolled.StatusCode);
+        var registration = (await enrolled.Content.ReadFromJsonAsync<EnrollmentResponse>())!;
+        var invoice = await GetInvoice(registration.Id);
+        var enrolledEvent = Assert.Single(_factory.EnrollmentEvents);
+        var invoiceEvent = Assert.Single(_factory.Invoices);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+            var stored = await db.Enrollments.SingleAsync();
+            db.Entry(stored).Property(x => x.Status).CurrentValue = "Cancelled";
+            db.Entry(stored).Property(x => x.IsActive).CurrentValue = false;
+            await db.SaveChangesAsync();
+            Assert.Equal(1, (await db.Classes.SingleAsync()).CurrentStudents);
+        }
+
+        const string memberships = "/api/enrollment/memberships";
+        var response = method == "POST"
+            ? await _client.PostAsJsonAsync(memberships, new { classId = _class, studentId = _student })
+            : await _client.PatchAsJsonAsync($"{memberships}/{registration.Id}/status", new { isActive = true });
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+            var stored = Assert.Single(await db.Enrollments.ToListAsync());
+            Assert.Equal(registration.Id, stored.Id);
+            Assert.Equal("Cancelled", stored.Status);
+            Assert.False(stored.IsActive);
+            Assert.Equal((3, 5, 2), (stored.MaxAbsences, stored.MaxLates, stored.MaxSkippedAssignments));
+            Assert.Equal(registration.TuitionFee, stored.TuitionFee);
+            Assert.Equal(1, (await db.Classes.SingleAsync()).CurrentStudents);
+            Assert.False(await scope.ServiceProvider.GetRequiredService<IEnrollmentAccess>().IsActiveAsync(_class, _student, default));
+            Assert.Equal(invoice.Id, (await scope.ServiceProvider.GetRequiredService<FinanceDbContext>().Invoices.SingleAsync()).Id);
+        }
+        Assert.Equal(invoice, await GetInvoice(registration.Id));
+        Assert.Equal(enrolledEvent, Assert.Single(_factory.EnrollmentEvents));
+        Assert.Equal(invoiceEvent, Assert.Single(_factory.Invoices));
     }
 
     [Fact]
@@ -267,14 +449,15 @@ public sealed partial class Tv3Week3Tests : IAsyncLifetime
     public async Task EnrollmentSaveFailure_RollsBackReservedSeat_AndDoesNotPublish()
     {
         _factory.EnrollmentSave.Fail = true;
-        using var scope = _factory.Services.CreateScope();
-        var service = scope.ServiceProvider.GetRequiredService<EnrollmentService>();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.EnrollAsync(Request(), default));
+        Assert.Equal(HttpStatusCode.InternalServerError, (await Enroll()).StatusCode);
+        Assert.False(_factory.EnrollmentSave.Fail);
         using var verify = _factory.Services.CreateScope();
         var db = verify.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
         Assert.Empty(await db.Enrollments.ToListAsync());
         Assert.Equal(0, (await db.Classes.SingleAsync()).CurrentStudents);
         Assert.Empty(_factory.Invoices);
+        Assert.Empty(_factory.EnrollmentEvents);
+        Assert.Empty(await verify.ServiceProvider.GetRequiredService<FinanceDbContext>().Invoices.ToListAsync());
     }
 
     [Fact]
@@ -379,7 +562,8 @@ public sealed partial class Tv3Week3Tests : IAsyncLifetime
     private async Task<Guid> CreateUser(string name, string role)
     {
         var r = await _client.PostAsJsonAsync("/api/identity/users", new CreateUserRequest($"{name}@week3.test", name, Password, role));
-        r.EnsureSuccessStatusCode(); return (await r.Content.ReadFromJsonAsync<UserResponse>())!.Id;
+        Assert.True(r.IsSuccessStatusCode, $"Create {role}: {r.StatusCode}: {await r.Content.ReadAsStringAsync()}");
+        return (await r.Content.ReadFromJsonAsync<UserResponse>())!.Id;
     }
     private async Task<Guid> CreateClass(int capacity = 20, DateOnly? end = null)
     {
@@ -404,8 +588,18 @@ public sealed partial class Tv3Week3Tests : IAsyncLifetime
         }
     }
 
+    private sealed class TestStudentCodes : IStudentCodeGenerator
+    {
+        private int sequence;
+        public Task<string> AllocateAsync(DateTimeOffset createdAt, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult($"HV{Interlocked.Increment(ref sequence):D6}-{createdAt.UtcDateTime:yy}");
+        }
+    }
+
     private sealed class Week3Factory : WebApplicationFactory<Program>, IIntegrationEventHandler<InvoiceCreatedIntegrationEvent>,
-        IIntegrationEventHandler<EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents.WarningIssuedIntegrationEvent>,
+        IIntegrationEventHandler<StudentEnrolledIntegrationEvent>, IIntegrationEventHandler<WarningIssuedIntegrationEvent>,
         IIntegrationEventHandler<InvoicePaidIntegrationEvent>
     {
         private readonly string? _server = Environment.GetEnvironmentVariable("TV3_POSTGRES");
@@ -416,11 +610,14 @@ public sealed partial class Tv3Week3Tests : IAsyncLifetime
         public FailSave EnrollmentSave { get; } = new();
         public FailSave FinanceSave { get; } = new();
         public System.Collections.Concurrent.ConcurrentBag<InvoiceCreatedIntegrationEvent> Invoices { get; } = [];
+        public System.Collections.Concurrent.ConcurrentBag<StudentEnrolledIntegrationEvent> EnrollmentEvents { get; } = [];
         public Task HandleAsync(InvoiceCreatedIntegrationEvent e, CancellationToken cancellationToken = default)
         { Invoices.Add(e); return Task.CompletedTask; }
-        public System.Collections.Concurrent.ConcurrentBag<EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents.WarningIssuedIntegrationEvent> WarningEvents { get; } = [];
+        public Task HandleAsync(StudentEnrolledIntegrationEvent e, CancellationToken cancellationToken = default)
+        { EnrollmentEvents.Add(e); return Task.CompletedTask; }
+        public System.Collections.Concurrent.ConcurrentBag<WarningIssuedIntegrationEvent> WarningEvents { get; } = [];
         public System.Collections.Concurrent.ConcurrentBag<InvoicePaidIntegrationEvent> PaymentEvents { get; } = [];
-        public Task HandleAsync(EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents.WarningIssuedIntegrationEvent e, CancellationToken cancellationToken = default)
+        public Task HandleAsync(WarningIssuedIntegrationEvent e, CancellationToken cancellationToken = default)
         { WarningEvents.Add(e); return Task.CompletedTask; }
         public Task HandleAsync(InvoicePaidIntegrationEvent e, CancellationToken cancellationToken = default)
         { PaymentEvents.Add(e); return Task.CompletedTask; }
@@ -448,9 +645,15 @@ public sealed partial class Tv3Week3Tests : IAsyncLifetime
             {
                 Replace<IdentityDbContext>(services, "identity"); Replace<AcademicDbContext>(services, "academic");
                 Replace<EnrollmentDbContext>(services, "enrollment", EnrollmentSave); Replace<FinanceDbContext>(services, "finance", FinanceSave);
-                services.AddSingleton<TimeProvider>(Clock);
+                if (!Postgres)
+                {
+                    services.RemoveAll<IStudentCodeGenerator>();
+                    services.AddSingleton<IStudentCodeGenerator, TestStudentCodes>();
+                }
                 services.AddSingleton<IIntegrationEventHandler<InvoiceCreatedIntegrationEvent>>(this);
-                services.AddSingleton<IIntegrationEventHandler<EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents.WarningIssuedIntegrationEvent>>(this);
+                services.AddSingleton<IIntegrationEventHandler<StudentEnrolledIntegrationEvent>>(this);
+                services.AddSingleton<TimeProvider>(Clock);
+                services.AddSingleton<IIntegrationEventHandler<WarningIssuedIntegrationEvent>>(this);
                 services.AddSingleton<IIntegrationEventHandler<InvoicePaidIntegrationEvent>>(this);
             });
         }

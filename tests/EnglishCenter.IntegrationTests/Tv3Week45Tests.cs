@@ -281,17 +281,33 @@ public sealed partial class Tv3Week3Tests
     }
 
     [PgFact]
-    public async Task Week5_PostgreSql_MigrationUpgrade_PreservesWeek3EnrollmentsAndSeats()
+    public async Task Week5_PostgreSql_MigrationUpgrade_PreservesDevelopEnrollmentAndMembership()
     {
         var enrollment = await EnrollValue();
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
-        // Database tạm của fixture: đưa về schema tuần 3 rồi nâng cấp lại, kiểm tra dữ liệu còn nguyên.
-        await db.GetService<IMigrator>().MigrateAsync("20261105000727_InitialEnrollment");
-        Assert.Equal(enrollment.Id, (await db.Enrollments.AsNoTracking().SingleAsync()).Id);
+        const string monitoring = "20261110003346_AddMonitoringAndPlacementTests";
+        const string originalMembership = "20261109103109_AddClassMembership";
+        const string unifiedMembership = "20261112120000_UnifyEnrollmentMembership";
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await _client.DeleteAsync($"/api/enrollment/memberships/{enrollment.Id}")).StatusCode);
+
+        // Chỉ gỡ migration giám sát trong DB tạm để tái hiện develop đã hợp nhất quyền truy cập lớp.
+        var rollbackMonitoring = db.GetService<IMigrator>().GenerateScript(monitoring, originalMembership);
+        await db.Database.ExecuteSqlRawAsync(rollbackMonitoring);
+        var before = await db.Database.GetAppliedMigrationsAsync();
+        Assert.Contains(unifiedMembership, before);
+        Assert.DoesNotContain(monitoring, before);
+        var original = await db.Enrollments.AsNoTracking().SingleAsync();
+        Assert.Equal(enrollment.Id, original.Id);
+        Assert.False(original.IsActive);
+
         await db.Database.MigrateAsync();
+        Assert.Contains(monitoring, await db.Database.GetAppliedMigrationsAsync());
         Assert.Equal(1, (await db.Classes.AsNoTracking().SingleAsync()).CurrentStudents);
-        Assert.Equal(enrollment.Id, (await db.Enrollments.AsNoTracking().SingleAsync()).Id);
+        var restored = await db.Enrollments.AsNoTracking().SingleAsync();
+        Assert.Equal(original.Id, restored.Id);
+        Assert.False(restored.IsActive);
         await SetLimits(enrollment.Id); await Missed(Guid.NewGuid());
         Assert.Single(_factory.WarningEvents);
     }

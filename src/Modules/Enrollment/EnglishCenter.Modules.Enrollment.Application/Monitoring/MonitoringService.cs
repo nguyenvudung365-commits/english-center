@@ -22,7 +22,8 @@ public interface IMonitoringStore
     Task<WarningResponse?> FindWarningAsync(Guid id, CancellationToken ct);
 }
 
-public sealed class MonitoringService(IMonitoringStore store, IEnrollmentStore enrollments, IEventBus events, TimeProvider clock)
+public sealed class MonitoringService(IMonitoringStore store, IEnrollmentStore enrollments, EnrollmentService access,
+    IEventBus events, TimeProvider clock)
 {
     public static (int Page, int Size) Pagination(int page, int size)
     {
@@ -30,27 +31,31 @@ public sealed class MonitoringService(IMonitoringStore store, IEnrollmentStore e
         return (page, Math.Min(size, 100));
     }
 
-    public async Task<LimitsResponse> GetLimitsAsync(Guid id, Guid? student, CancellationToken ct)
+    public async Task<LimitsResponse> GetLimitsAsync(Guid id, CancellationToken ct)
     {
+        var student = await access.StudentFilterAsync(null, ct);
         var x = await enrollments.FindAsync(id, ct);
         if (x is null || (student.HasValue && student != x.StudentId)) throw new EnrollmentFailure(404, "Enrollment not found.");
         return Response(x);
     }
     public async Task<LimitsResponse> SetLimitsAsync(Guid id, LimitsRequest request, CancellationToken ct)
     {
+        await access.EnsureManagerAsync(ct);
         if (request.MaxAbsences is null or < 0 || request.MaxLates is null or < 0 || request.MaxSkippedAssignments is null or < 0)
             throw new EnrollmentFailure(400, "Three non-negative limits are required.");
         var result = await store.SetLimitsAsync(id, request, clock.GetUtcNow().UtcDateTime, ct);
         await PublishAsync(result, ct);
         return Response(result.Enrollment);
     }
-    public Task<PageResult<WarningResponse>> WarningsAsync(Guid? student, Guid? enrollment, int page, int size, CancellationToken ct)
+    public async Task<PageResult<WarningResponse>> WarningsAsync(Guid? filter, Guid? enrollment, int page, int size, CancellationToken ct)
     {
+        var student = await access.StudentFilterAsync(filter, ct);
         (page, size) = Pagination(page, size);
-        return store.WarningsAsync(student, enrollment, page, size, ct);
+        return await store.WarningsAsync(student, enrollment, page, size, ct);
     }
     public async Task ReplayAsync(Guid id, CancellationToken ct)
     {
+        await access.EnsureManagerAsync(ct);
         var x = await store.FindWarningAsync(id, ct) ?? throw new EnrollmentFailure(404, "Warning not found.");
         await PublishWarningAsync(x, ct);
     }

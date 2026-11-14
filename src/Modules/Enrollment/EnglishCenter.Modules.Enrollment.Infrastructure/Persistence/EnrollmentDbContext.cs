@@ -50,6 +50,7 @@ public sealed class EnrollmentDbContext : DbContext
             b.HasOne<Student>().WithMany().HasForeignKey(x => x.StudentId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<ClassSnapshot>().WithMany().HasForeignKey(x => x.ClassId).OnDelete(DeleteBehavior.Restrict);
             b.Property(x => x.Status).HasMaxLength(20); b.Property(x => x.TuitionFee).HasPrecision(12, 0);
+            b.Property(x => x.IsActive).HasDefaultValue(true);
             b.Property(x => x.EnrolledAt).HasConversion(x => x, x => DateTime.SpecifyKind(x, DateTimeKind.Utc));
         });
         modelBuilder.Entity<AttendanceSnapshot>(b =>

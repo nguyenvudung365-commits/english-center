@@ -19,17 +19,7 @@ public sealed class EnrollmentsController(EnrollmentService service) : Controlle
     }
 
     [HttpGet("{id:guid}"), Authorize(Roles = Managers + "," + Roles.Student)]
-    public Task<EnrollmentResponse> Get(Guid id, CancellationToken ct)
-    {
-        Guid? student = null;
-        if (!User.IsInRole(Roles.Staff) && !User.IsInRole(Roles.Admin))
-        {
-            if (!Guid.TryParse(User.FindFirst(AuthClaims.Subject)?.Value, out var subject))
-                throw new EnrollmentFailure(403, "Invalid user subject.");
-            student = subject;
-        }
-        return service.GetAsync(id, student, ct);
-    }
+    public Task<EnrollmentResponse> Get(Guid id, CancellationToken ct) => service.GetAsync(id, ct);
 
     // Đối soát thủ công khi event bus trong bộ nhớ đã bỏ qua handler lỗi.
     [HttpPost("{id:guid}/replay"), Authorize(Roles = Managers)]

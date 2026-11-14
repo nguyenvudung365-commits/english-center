@@ -10,8 +10,14 @@ public sealed record ChangePasswordRequest([Required, MaxLength(128)] string Cur
     [Required, MinLength(8), MaxLength(128)] string NewPassword);
 public sealed record CreateUserRequest([Required, EmailAddress, MaxLength(254)] string Email,
     [Required, MaxLength(200)] string FullName,
-    [Required, MinLength(8), MaxLength(128)] string Password, [Required] string Role);
-public sealed record UserResponse(Guid Id, string Email, string FullName, string Role);
+    [Required, MinLength(8), MaxLength(128)] string Password, [Required] string Role,
+    [MaxLength(32)] string? Phone = null);
+public sealed record UserResponse(Guid Id, string Email, string FullName, string Role, string? Phone = null, string? StudentCode = null);
+public sealed record UpdateProfileRequest([Required, MaxLength(200)] string FullName,
+    [Required, EmailAddress, MaxLength(254)] string Email, [MaxLength(32)] string? Phone,
+    Guid? AvatarFileId, [Required] Guid? ExpectedRevision);
+public sealed record ProfileResponse(Guid Id, string Role, string FullName, string Email, string? Phone,
+    string? StudentCode, Guid? AvatarFileId, Uri? AvatarUrl, DateTimeOffset? AvatarUrlExpiresAt, Guid Revision);
 public sealed record TokenResponse(string AccessToken, DateTimeOffset AccessTokenExpiresAt,
     string RefreshToken, DateTimeOffset RefreshTokenExpiresAt);
 

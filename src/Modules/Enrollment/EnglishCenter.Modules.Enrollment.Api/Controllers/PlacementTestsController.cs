@@ -11,15 +11,15 @@ public sealed class PlacementTestsController(PlacementTestService service) : Con
     [HttpPost, Authorize(Roles = EnrollmentAccess.Managers)]
     public async Task<IActionResult> Create(PlacementTestRequest request, CancellationToken ct)
     {
-        var value = await service.CreateAsync(request, EnrollmentAccess.Subject(User), ct);
+        var value = await service.CreateAsync(request, ct);
         return CreatedAtAction(nameof(Get), new { id = value.Id }, value);
     }
     [HttpPut("{id:guid}"), Authorize(Roles = EnrollmentAccess.Managers)]
     public Task<PlacementTestResponse> Update(Guid id, UpdatePlacementTestRequest request, CancellationToken ct) => service.UpdateAsync(id, request, ct);
     [HttpGet("{id:guid}")]
-    public Task<PlacementTestResponse> Get(Guid id, CancellationToken ct) => service.GetAsync(id, EnrollmentAccess.Student(User), ct);
+    public Task<PlacementTestResponse> Get(Guid id, CancellationToken ct) => service.GetAsync(id, ct);
     [HttpGet]
     public Task<PageResult<PlacementTestResponse>> List(CancellationToken ct, [FromQuery] Guid? studentId = null,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 20) =>
-        service.ListAsync(EnrollmentAccess.Student(User, studentId), page, pageSize, ct);
+        service.ListAsync(studentId, page, pageSize, ct);
 }

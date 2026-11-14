@@ -26,6 +26,24 @@ const json = (value: unknown, status = 200) =>
     });
 
 describe("API session contract", () => {
+    it("retains a deadline when a caller provides cancellation", async () => {
+        setSession(tokens());
+        const caller = new AbortController();
+        const deadline = new AbortController();
+        const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+        fetcher.mockImplementation((_path, init) => new Promise((_resolve, reject) => {
+            init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
+        }));
+        try {
+            const operation = api("/identity/me", { signal: caller.signal });
+            expect(timeout).toHaveBeenCalledWith(15000);
+            const signal = fetcher.mock.calls[0][1]!.signal!;
+            expect(signal).not.toBe(caller.signal);
+            deadline.abort(new DOMException("Deadline", "TimeoutError"));
+            await expect(operation).rejects.toMatchObject({ status: 0 });
+            expect(caller.signal.aborted).toBe(false);
+        } finally { caller.abort(); timeout.mockRestore(); }
+    });
     it("does not clear a newer login when an old logout completes", async () => {
         setSession(tokens());
         let finish!: (response: Response) => void;

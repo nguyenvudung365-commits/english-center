@@ -9,5 +9,6 @@
     <ProjectReference Include="..\..\..\BuildingBlocks\EnglishCenter.BuildingBlocks\EnglishCenter.BuildingBlocks.csproj" />
     <ProjectReference Include="..\..\Identity\EnglishCenter.Modules.Identity.Contracts\EnglishCenter.Modules.Identity.Contracts.csproj" />
     <ProjectReference Include="..\..\Enrollment\EnglishCenter.Modules.Enrollment.Contracts\EnglishCenter.Modules.Enrollment.Contracts.csproj" />
+    <ProjectReference Include="..\..\MediaNotification\EnglishCenter.Modules.MediaNotification.Contracts\EnglishCenter.Modules.MediaNotification.Contracts.csproj" />
   </ItemGroup>
 </Project>

@@ -16,6 +16,10 @@ internal sealed class FakeAcademicStore : IAcademicStore
     public List<Course> Courses { get; } = [];
     public List<Teacher> Teachers { get; } = [];
     public bool ConflictOnSave { get; set; }
+    public int ConflictsRemaining { get; set; }
+    public int SaveAttempts { get; private set; }
+    public int ReloadCount { get; private set; }
+    public Action? BeforeReloadTeacher { get; set; }
     public int SaveCount { get; private set; }
 
     public Task<bool> ClassCodeExistsAsync(string normalizedCode, CancellationToken ct) =>
@@ -25,14 +29,24 @@ internal sealed class FakeAcademicStore : IAcademicStore
     public Task<Course?> FindCourseAsync(Guid id, CancellationToken ct) => Task.FromResult(Courses.SingleOrDefault(x => x.Id == id));
     public Task<IReadOnlyList<Course>> CoursesAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<Course>>(Courses);
     public Task<Teacher?> FindTeacherAsync(Guid id, CancellationToken ct) => Task.FromResult(Teachers.SingleOrDefault(x => x.Id == id));
+    public Task<Teacher?> ReloadTeacherAsync(Guid id, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        ReloadCount++;
+        _pendingTeachers.Clear();
+        BeforeReloadTeacher?.Invoke();
+        return Task.FromResult(Teachers.SingleOrDefault(x => x.Id == id));
+    }
     public Task<IReadOnlyList<Teacher>> TeachersAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<Teacher>>(Teachers);
     public void AddClass(Class academicClass) => _pendingClasses.Add(academicClass);
     public void AddTeacher(Teacher teacher) => _pendingTeachers.Add(teacher);
 
     public Task SaveAsync(CancellationToken ct)
     {
-        if (ConflictOnSave)
+        SaveAttempts++;
+        if (ConflictOnSave || ConflictsRemaining > 0)
         {
+            if (ConflictsRemaining > 0) ConflictsRemaining--;
             _pendingClasses.Clear();
             _pendingTeachers.Clear();
             throw new AcademicFailure(409, "Academic data already exists.");
@@ -50,7 +64,8 @@ internal sealed class RecordingEventBus : IEventBus
 {
     public List<IIntegrationEvent> Published { get; } = [];
 
-    public Task PublishAsync<TEvent>(TEvent integrationEvent, CancellationToken cancellationToken = default)
+    public Task PublishAsync<TEvent>(TEvent integrationEvent, CancellationToken cancellationToken = default,
+        bool throwOnHandlerFailure = false)
         where TEvent : IIntegrationEvent
     {
         Published.Add(integrationEvent);

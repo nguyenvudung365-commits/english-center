@@ -479,7 +479,8 @@ header {
 }
 .account-grid {
     display: grid;
-    grid-template-columns: minmax(220px, 1fr) minmax(300px, 1.6fr);
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    align-items: start;
     gap: 24px;
 }
 .panel {
@@ -496,6 +497,165 @@ header {
 }
 .accent {
     color: #0369a1;
+}
+.identity-create-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(240px, 1fr);
+    gap: 24px;
+    align-items: start;
+}
+.identity-panel, .identity-guide {
+    min-width: 0;
+}
+.identity-panel form {
+    max-width: none;
+}
+.identity-panel fieldset {
+    min-width: 0;
+    padding: 0;
+    margin: 0;
+    border: 0;
+}
+.identity-section-heading, .student-code {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+.identity-section-heading .eyebrow {
+    margin-bottom: 8px;
+}
+.identity-section-heading h2 {
+    margin-bottom: 8px;
+}
+.profile-avatar-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 18px;
+    margin-bottom: 24px;
+}
+.profile-avatar {
+    display: grid;
+    place-items: center;
+    width: 80px;
+    height: 80px;
+    flex: 0 0 80px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: #edf4f8;
+    color: var(--accent);
+    border: 1px solid var(--border);
+}
+.profile-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.profile-avatar-controls {
+    min-width: 0;
+    flex: 1 1 200px;
+}
+.profile-avatar-controls small, .identity-panel .field-error {
+    display: block;
+}
+.file-picker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.avatar-file-input {
+    padding: 8px;
+    font-size: 0.85rem;
+    margin-bottom: 6px;
+}
+.student-code {
+    padding: 16px;
+    margin-bottom: 24px;
+    background: #edf4f8;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: #075985;
+}
+.student-code small, .student-code strong {
+    display: block;
+}
+.student-code strong {
+    margin-top: 4px;
+    font-size: 1.15rem;
+    letter-spacing: 0.04em;
+}
+.identity-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+.text-button {
+    min-height: 44px;
+    background: transparent;
+    color: #075985;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    padding: 8px 0;
+}
+.password-input {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+}
+.password-input input {
+    flex: 1;
+}
+.password-input button {
+    margin-top: 7px;
+    min-width: 44px;
+    min-height: 44px;
+    border: 1px solid #94a3b8;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: var(--primary);
+}
+.identity-panel .optional {
+    font-weight: 400;
+    font-size: 0.85rem;
+    color: #475569;
+}
+.identity-panel .error a {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+.identity-created {
+    overflow-wrap: anywhere;
+}
+.identity-created p {
+    color: inherit;
+    margin: 8px 0;
+}
+.identity-guide ol {
+    padding-left: 22px;
+    color: #475569;
+}
+.identity-guide li {
+    margin-bottom: 16px;
+    padding-left: 4px;
+}
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+@media (max-width: 1100px) {
+    .identity-create-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 dl {
     display: grid;
@@ -822,4 +982,37 @@ footer {
         transition: none !important;
         scroll-behavior: auto !important;
     }
+}
+
+.submission-list {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    gap: 12px;
+}
+.submission-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid #e2e8f0;
+}
+.submission-list span, .submission-review code, .panel code {
+    overflow-wrap: anywhere;
+}
+.submission-review {
+    padding-block: 18px;
+    border-bottom: 1px solid #e2e8f0;
+}
+.assignment-description { white-space: pre-wrap; }
+.academic-form textarea {
+    width: 100%;
+    min-height: 120px;
+    resize: vertical;
+    border: 1px solid #94a3b8;
+    border-radius: 8px;
+    padding: 12px;
+    font: inherit;
 }

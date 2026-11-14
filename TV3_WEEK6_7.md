@@ -9,7 +9,8 @@
 ```
 
 - `completedClasses` là số ghi danh `Active` vào lớp có ngày kết thúc trước ngày hiện tại theo giờ Việt Nam (UTC+7). Lớp kết thúc hôm nay được tính từ 00:00 ngày mai. Ghi danh `Cancelled` không được tính.
-- API lấy mã học viên từ JWT. Query string `studentId` không thay đổi phạm vi dữ liệu. Học viên chưa hoàn thành lớp nào nhận `{"completedClasses":0}`. Thiếu JWT hợp lệ trả `401`. Teacher, Staff và Admin trả `403`.
+- API lấy mã học viên từ JWT và xác nhận tài khoản Student còn hoạt động. Query string `studentId` không thay đổi phạm vi dữ liệu. Học viên chưa hoàn thành lớp nào nhận `{"completedClasses":0}`. Thiếu JWT hợp lệ trả `401`. Teacher, Staff, Admin và tài khoản đã khóa trả `403`.
+- Thu hồi quyền bài tập qua `/api/enrollment/memberships` chỉ thay đổi quyền truy cập bài tập. Thống kê tiếp tục dựa trên trạng thái ghi danh.
 - TV4 có thể dùng trường `completedClasses` cho mục “Lớp đã hoàn thành” trên giao diện thống kê. Số liệu được đếm trong một truy vấn từ `enrollment.enrollments` và `enrollment.class_snapshots`. API sử dụng schema và dữ liệu hiện có, không cần migration.
 
 ## Tuần 7 — Kịch bản demo
@@ -32,6 +33,7 @@ dotnet test EnglishCenter.sln -c Release --filter 'FullyQualifiedName~Week6_|Ful
 - **US-29 Enrollment.** Các ca `Week6_` kiểm tra ngày kết thúc, nửa đêm UTC+7, ghi danh đã hủy, dữ liệu rỗng, quyền Student và truy vấn kèm mã học viên khác.
 - **US-12, US-23 và US-24.** Ca `Week7_` gọi API Identity, Academic, Enrollment và Finance, kiểm tra học phí/hạn thanh toán, chống trùng khi replay, chuyển trạng thái hóa đơn và quyền đọc theo học viên. Bộ hồi quy tuần 3–5 kiểm tra thêm lớp đầy, rollback, thanh toán đồng thời và nhật ký thanh toán.
 - **US-13 và US-15.** Ca `Week7_` kiểm tra ngưỡng cảnh báo và chống trùng qua event bus, đối chiếu sự kiện đã phát với cảnh báo trả qua API. Bộ hồi quy tuần 4–5 kiểm tra thêm sửa điểm danh, sự kiện đến sai thứ tự, giới hạn và cập nhật đồng thời.
+- **Tích hợp develop.** Kiểm tra JWT của tài khoản đã khóa bị từ chối ở các API mới. Ca migration PostgreSQL kiểm tra nâng cấp từ schema Enrollment đã hợp nhất quyền bài tập, giữ mã ghi danh, sĩ số và trạng thái quyền truy cập.
 - **US-14.** Bộ hồi quy tuần 5 kiểm tra hẹn test, cập nhật và giới hạn quyền đọc đối với từng học viên.
 
 ```powershell
@@ -44,12 +46,13 @@ $env:ENGLISHCENTER_TEST_POSTGRES = $env:TV3_POSTGRES
 dotnet test EnglishCenter.sln -c Release --logger 'trx;LogFilePrefix=tv3-week67'
 ```
 
-### Kết quả ngày 14/11/2026
+### Kết quả sau khi tích hợp develop `1dbe848`
 
-- PostgreSQL 16.15, bản Release: **331/331 ca đạt**, gồm 187 ca tích hợp, 53 ca kiến trúc, 58 ca Academic và 33 ca BuildingBlocks.
-- SQLite, bản Release: **320 ca đạt**, 11 ca chỉ chạy trên PostgreSQL được bỏ qua. Cả ba ca mới đạt trên hai hệ quản trị cơ sở dữ liệu.
-- Báo cáo TRX cục bộ nằm trong `../.tools/verification/tv3-week67/release-postgres/` và `../.tools/verification/tv3-week67/release-sqlite/`.
+- PostgreSQL 16.15, bản Release: **559/559 ca đạt**, gồm 408 ca tích hợp, 53 ca kiến trúc, 61 ca Academic và 37 ca BuildingBlocks.
+- SQLite, bản Release: **542 ca đạt**, 17 ca chỉ chạy trên PostgreSQL được bỏ qua.
+- Frontend: **242/242 ca đạt**, build Vite thành công.
+- Báo cáo TRX cục bộ nằm trong `../.tools/verification/tv3-merged/postgres/` và `../.tools/verification/tv3-merged/sqlite/`.
 
 ### Phạm vi xác nhận
 
-Kịch bản cảnh báo gửi sự kiện vào event bus từ fixture kiểm thử. Nhánh TV3 chưa có API ghi điểm danh để chạy từ Swagger hoặc handler MediaNotification để kiểm tra thông báo đến người nhận. Cảnh báo đã lưu được kiểm tra qua API Enrollment. Kết quả là trên cây làm việc `TV3` (HEAD `94a4eba`), gồm phần tuần 5 cục bộ. `develop` tại `1dbe848` có thay đổi về quyền truy cập lớp và migration Enrollment cần đối chiếu khi tích hợp. Kiểm thử bản tích hợp, giao diện thống kê và triển khai staging thuộc đợt bàn giao chung.
+Kịch bản cảnh báo gửi sự kiện vào event bus từ fixture kiểm thử và đọc cảnh báo đã lưu qua API Enrollment. Giao diện thống kê, API ghi điểm danh, thông báo cảnh báo đến người nhận và triển khai staging thuộc đợt bàn giao chung.

@@ -10,5 +10,5 @@ public sealed class EnrollmentStatisticsController(EnrollmentService service) : 
 {
     [HttpGet]
     public Task<EnrollmentStatisticsResponse> Get(CancellationToken ct) =>
-        service.GetStatisticsAsync(EnrollmentAccess.Subject(User), ct);
+        service.GetStatisticsAsync(ct);
 }

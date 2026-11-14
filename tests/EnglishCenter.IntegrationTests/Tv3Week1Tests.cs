@@ -62,7 +62,8 @@ public sealed class Tv3Week1Tests
     private sealed class CapturingBus : IEventBus
     {
         public IIntegrationEvent? Value { get; private set; }
-        public Task PublishAsync<TEvent>(TEvent integrationEvent, CancellationToken cancellationToken = default) where TEvent : IIntegrationEvent
+        public Task PublishAsync<TEvent>(TEvent integrationEvent, CancellationToken cancellationToken = default,
+            bool throwOnHandlerFailure = false) where TEvent : IIntegrationEvent
         { Value = integrationEvent; return Task.CompletedTask; }
     }
 }

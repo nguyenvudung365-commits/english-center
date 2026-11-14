@@ -45,6 +45,7 @@ Quy ước truy cập dữ liệu của người khác (học viên xem dữ li�
 | `POST /api/identity/auth/login`, `refresh` | Có | Có | Có | Có | Có |
 | `POST /api/identity/auth/logout`, `change-password` | 401 | Có | Có | Có | Có |
 | `POST /api/identity/users` | 401 | 403 | 403 | Có | Có |
+| `GET /api/identity/me`, `PUT /api/identity/me` | 401 | Chính mình | Chính mình | Chính mình | Chính mình |
 | `POST /api/identity/users/republish` | 401 | 403 | 403 | 403 | Có |
 | `POST /api/academic/classes`, `GET /api/academic/classes/{id}` | 401 | 403 | 403 | Có | Có |
 | `GET /api/academic/courses`, `GET /api/academic/teachers` | 401 | 403 | 403 | Có | Có |
@@ -66,3 +67,19 @@ Quy tắc: mọi action mới phải khai báo `[Authorize]` (kèm `Roles` nếu
 `POST /api/identity/users/republish`, chỉ `Admin`. Body `{ "role": "Teacher" }` hoặc `{}` (mọi role). Role không hợp lệ trả 400. Trả `{ "published": <số>, "role": <role|null> }`; không trả email hay hash.
 
 Endpoint phát lại `UserRegisteredIntegrationEvent` cho từng tài khoản đã có, để module khác dựng bản sao cho tài khoản tạo từ trước (kể cả admin bootstrap). Do đó **mọi handler `UserRegistered` phải idempotent theo `UserId`** và bỏ qua role không thuộc module. Event bus in-memory nuốt lỗi handler, nên số `published` chỉ là số event đã phát, không phải số đã xử lý thành công; xem log để biết lỗi.
+
+## 7. Hồ sơ riêng và tạo tài khoản (US-04/US-05)
+
+- `GET /api/identity/me` trả `id`, `role`, `fullName`, `email`, `phone`, `studentCode`, `avatarFileId`, `avatarUrl`, `avatarUrlExpiresAt`, `revision`; không trả hash/mật khẩu. Phản hồi không được cache (`no-store`).
+- `PUT /api/identity/me` nhận `{ "fullName", "email", "phone", "avatarFileId", "expectedRevision" }`. Lấy `expectedRevision` từ lần đọc/lưu gần nhất. Email trùng hoặc revision cũ trả **409**, phải đọc lại trước khi lưu đè bản nháp. Không có tham số chọn người dùng khác; không cập nhật role, mã học viên hay trạng thái khóa.
+- Họ tên/email được trim, tối đa 200/254 ký tự. SĐT tùy chọn, tối đa 32 ký tự; trống được lưu thành `null`. `avatarFileId: null` bỏ liên kết ảnh, không xóa ngay object.
+- Mã chỉ có ở Student, dạng `HV000001-26`: sáu chữ số thứ tự toàn cục, hai số cuối là năm tạo tài khoản UTC. Mã không thay đổi khi sửa hồ sơ; số đã cấp không tái sử dụng, có thể có khoảng trống.
+- Ảnh nhận `.jpg`/`.png`, MIME tương ứng `image/jpeg`/`image/png`, lớn hơn 0 và tối đa **2 MiB**. Xin vé tại `POST /api/media-notification/files/presign` với `purpose: "avatar"`, PUT lên URL bằng header trong vé (không gửi bearer/cookie ứng dụng), rồi `POST /api/media-notification/files/{fileId}/confirm`. Chỉ file avatar đã xác nhận thuộc chính mình mới gắn được vào hồ sơ; file nộp bài không dùng thay thế.
+- `avatarUrl` là URL ký ngắn hạn, không lưu vào request cập nhật. Đọc lại `/me` để lấy URL mới; không thay bản nháp/revision bằng dữ liệu đọc chỉ nhằm gia hạn ảnh.
+- `POST /api/identity/users` vẫn chỉ cho Admin/Staff đang hoạt động tạo Student/Teacher. Request thêm `phone` tùy chọn; response thêm `phone`/`studentCode`, không trả token. Không có đăng ký công khai, không đăng nhập thay người vừa tạo.
+- Hồ sơ chỉ được thao tác bởi tài khoản đang hoạt động với role còn khớp token. Đổi email không đổi token; đổi mật khẩu vẫn dùng endpoint riêng.
+- Thay đổi tên/email Teacher phát snapshot có `ProfileVersion`; Academic bỏ qua snapshot cũ hơn để tránh replay ghi đè tên mới. Đồng bộ qua event bus in-memory không bảo đảm bền vững/atomic với lần lưu Identity; dùng republish để sửa bản sao khi cần.
+
+Luồng cập nhật hồ sơ Teacher yêu cầu báo lỗi handler đồng bộ (khác các luồng publish best-effort cũ). Nếu bước này lỗi sau khi lưu Identity, API trả **503** với thông báo hồ sơ đã lưu nhưng đồng bộ chưa thành công. Không coi 503 này là rollback: giữ bản nháp, đọc lại `/me` lấy revision hiện tại và nhờ Admin republish sau khi khắc phục nguyên nhân. Republish vẫn là best-effort; kiểm tra log/bản sao Academic để xác nhận kết quả.
+
+Migration/backfill PostgreSQL và upload storage thật cần kiểm chứng trên môi trường riêng; kiểm thử SQLite/API giả lập không thay thế các bước này.

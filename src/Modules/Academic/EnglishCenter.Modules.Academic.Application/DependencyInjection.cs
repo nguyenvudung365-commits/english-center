@@ -12,9 +12,12 @@ public static class DependencyInjection
     public static IServiceCollection AddAcademicApplication(this IServiceCollection services)
     {
         services.AddScoped<ClassService>();
+        services.AddScoped<EnglishCenter.Modules.Academic.Contracts.IClassDirectory, ClassDirectory>();
+        services.AddScoped<Assignments.AssignmentService>();
         services.AddScoped<StudentClasses>();
         services.AddIntegrationEventHandler<StudentEnrolledIntegrationEvent, StudentEnrolledHandler>();
         services.AddIntegrationEventHandler<UserRegisteredIntegrationEvent, UserRegisteredIntegrationEventHandler>();
+        services.AddIntegrationEventHandler<UserProfileUpdatedIntegrationEvent, UserRegisteredIntegrationEventHandler>();
         return services;
     }
 }

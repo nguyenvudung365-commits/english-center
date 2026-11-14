@@ -10,19 +10,16 @@ namespace EnglishCenter.Modules.Finance.Api.Controllers;
 public sealed class InvoicesController(InvoiceQuery query, InvoiceManagement management) : ControllerBase
 {
     private const string Managers = Roles.Staff + "," + Roles.Admin;
-    private Guid Subject() => Guid.TryParse(User.FindFirst(AuthClaims.Subject)?.Value, out var id) && id != Guid.Empty
-        ? id : throw new FinanceFailure(403, "Invalid user subject.");
-    private Guid? Student(Guid? filter = null) => User.IsInRole(Roles.Staff) || User.IsInRole(Roles.Admin) ? filter : Subject();
 
     [HttpGet]
     public Task<InvoicePage> List(CancellationToken ct, [FromQuery] Guid? studentId = null, [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20) => management.ListAsync(Student(studentId), page, pageSize, ct);
+        [FromQuery] int pageSize = 20) => management.ListAsync(studentId, page, pageSize, ct);
 
     [HttpGet("{id:guid}")]
-    public Task<InvoiceResponse> GetById(Guid id, CancellationToken ct) => management.GetAsync(id, Student(), ct);
+    public Task<InvoiceResponse> GetById(Guid id, CancellationToken ct) => management.GetAsync(id, ct);
 
     [HttpPost("{id:guid}/pay"), Authorize(Roles = Managers)]
-    public Task<InvoiceResponse> Pay(Guid id, CancellationToken ct) => management.MarkPaidAsync(id, Subject(), ct);
+    public Task<InvoiceResponse> Pay(Guid id, CancellationToken ct) => management.MarkPaidAsync(id, ct);
 
     [HttpPost("{id:guid}/payment/replay"), Authorize(Roles = Managers)]
     public async Task<IActionResult> ReplayPayment(Guid id, CancellationToken ct)
@@ -31,13 +28,7 @@ public sealed class InvoicesController(InvoiceQuery query, InvoiceManagement man
     [HttpGet("by-enrollment/{enrollmentId:guid}")]
     public async Task<ActionResult<InvoiceResponse>> Get(Guid enrollmentId, CancellationToken ct)
     {
-        Guid? student = null;
-        if (!User.IsInRole(Roles.Staff) && !User.IsInRole(Roles.Admin))
-        {
-            if (!Guid.TryParse(User.FindFirst(AuthClaims.Subject)?.Value, out var id)) return Forbid();
-            student = id;
-        }
-        var value = await query.GetAsync(enrollmentId, student, ct);
+        var value = await query.GetAsync(enrollmentId, ct);
         return value is null ? NotFound() : Ok(value);
     }
 }

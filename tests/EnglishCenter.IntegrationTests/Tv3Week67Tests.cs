@@ -7,6 +7,7 @@ using EnglishCenter.Modules.Enrollment.Application.Registrations;
 using EnglishCenter.Modules.Enrollment.Domain.Registrations;
 using EnglishCenter.Modules.Enrollment.Infrastructure.Persistence;
 using EnglishCenter.Modules.Finance.Application.Invoices;
+using EnglishCenter.Modules.Identity.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -78,6 +79,36 @@ public sealed partial class Tv3Week3Tests
         await Login("Student");
         Assert.Equal(new EnrollmentStatisticsResponse(0),
             await _client.GetFromJsonAsync<EnrollmentStatisticsResponse>(StatisticsUrl));
+    }
+
+    [Fact]
+    public async Task Week7_LockedAccountsCannotUseExistingTokensForMonitoringOrInvoices()
+    {
+        var enrollment = await EnrollValue();
+        var invoice = await GetInvoice(enrollment.Id);
+        var staffToken = _client.DefaultRequestHeaders.Authorization;
+        await Login("Student");
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var student = await db.Users.SingleAsync(x => x.Id == _student);
+            var staff = await db.Users.SingleAsync(x => x.Email == "Staff@week3.test");
+            student.SetLocked(true);
+            staff.SetLocked(true);
+            await db.SaveChangesAsync();
+        }
+
+        foreach (var url in new[] { StatisticsUrl, WarningsUrl, LimitsUrl(enrollment.Id), PlacementUrl, InvoicesUrl, $"{InvoicesUrl}/{invoice.Id}" })
+            Assert.Equal(HttpStatusCode.Forbidden, (await _client.GetAsync(url)).StatusCode);
+
+        _client.DefaultRequestHeaders.Authorization = staffToken;
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await _client.PutAsJsonAsync(LimitsUrl(enrollment.Id), new LimitsRequest(0, 0, 0))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await _client.PostAsync($"{InvoicesUrl}/{invoice.Id}/pay", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await _client.PostAsJsonAsync(PlacementUrl, Placement())).StatusCode);
     }
 
     [Fact]

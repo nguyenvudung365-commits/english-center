@@ -38,6 +38,8 @@ public sealed class Registration
     public Guid StudentId { get; private set; }
     public Guid ClassId { get; private set; }
     public string Status { get; private set; } = "Active";
+    // Coursework access can be revoked without cancelling the paid seat or its invoice.
+    public bool IsActive { get; private set; } = true;
     public DateTime EnrolledAt { get; private set; }
     // Lưu học phí tại lúc ghi danh để đối soát/phát lại event.
     public decimal TuitionFee { get; private set; }

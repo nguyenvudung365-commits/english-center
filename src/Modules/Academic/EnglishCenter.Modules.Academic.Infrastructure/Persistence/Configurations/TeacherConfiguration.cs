@@ -14,5 +14,6 @@ internal sealed class TeacherConfiguration : IEntityTypeConfiguration<Teacher>
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.FullName).HasMaxLength(Teacher.FullNameMaxLength).IsRequired();
         builder.Property(x => x.Email).HasMaxLength(Teacher.EmailMaxLength).IsRequired();
+        builder.Property(x => x.ProfileVersion).HasDefaultValue(0L).IsConcurrencyToken();
     }
 }

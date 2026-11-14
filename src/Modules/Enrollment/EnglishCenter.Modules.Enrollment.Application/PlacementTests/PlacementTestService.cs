@@ -21,11 +21,11 @@ public interface IPlacementTestStore
     Task<PageResult<PlacementTestResponse>> ListAsync(Guid? student, int page, int size, CancellationToken ct);
 }
 
-public sealed class PlacementTestService(IPlacementTestStore store, TimeProvider clock)
+public sealed class PlacementTestService(IPlacementTestStore store, EnrollmentService access, TimeProvider clock)
 {
-    public async Task<PlacementTestResponse> CreateAsync(PlacementTestRequest request, Guid creator, CancellationToken ct)
+    public async Task<PlacementTestResponse> CreateAsync(PlacementTestRequest request, CancellationToken ct)
     {
-        if (creator == Guid.Empty) throw new EnrollmentFailure(403, "Invalid user subject.");
+        var creator = await access.EnsureManagerAsync(ct);
         if (!await store.StudentExistsAsync(request.StudentId, ct)) throw new EnrollmentFailure(400, "Student does not exist or is not synchronized yet.");
         await ValidateAsync(request.Location, request.Mode, request.ScheduledAt, request.TestName, "Pending", request.TeacherId, ct);
         var now = clock.GetUtcNow().UtcDateTime;
@@ -36,22 +36,25 @@ public sealed class PlacementTestService(IPlacementTestStore store, TimeProvider
     }
     public async Task<PlacementTestResponse> UpdateAsync(Guid id, UpdatePlacementTestRequest request, CancellationToken ct)
     {
+        await access.EnsureManagerAsync(ct);
         var value = await store.FindAsync(id, ct) ?? throw new EnrollmentFailure(404, "Placement test not found.");
         await ValidateAsync(request.Location, request.Mode, request.ScheduledAt, request.TestName, request.Status, request.TeacherId, ct);
         Apply(value, request.Location!, request.Mode!, request.ScheduledAt!.Value, request.TestName!, request.Status!, request.TeacherId);
         await store.SaveAsync(value, false, ct);
         return Response(value);
     }
-    public async Task<PlacementTestResponse> GetAsync(Guid id, Guid? student, CancellationToken ct)
+    public async Task<PlacementTestResponse> GetAsync(Guid id, CancellationToken ct)
     {
+        var student = await access.StudentFilterAsync(null, ct);
         var value = await store.FindAsync(id, ct);
         if (value is null || (student.HasValue && student != value.StudentId)) throw new EnrollmentFailure(404, "Placement test not found.");
         return Response(value);
     }
-    public Task<PageResult<PlacementTestResponse>> ListAsync(Guid? student, int page, int size, CancellationToken ct)
+    public async Task<PageResult<PlacementTestResponse>> ListAsync(Guid? filter, int page, int size, CancellationToken ct)
     {
+        var student = await access.StudentFilterAsync(filter, ct);
         (page, size) = MonitoringService.Pagination(page, size);
-        return store.ListAsync(student, page, size, ct);
+        return await store.ListAsync(student, page, size, ct);
     }
     private async Task ValidateAsync(string? location, string? mode, DateTimeOffset? at, string? name, string? status, Guid? teacher, CancellationToken ct)
     {

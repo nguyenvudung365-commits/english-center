@@ -4,8 +4,6 @@ using EnglishCenter.Modules.Finance.Domain.Invoices;
 
 namespace EnglishCenter.Modules.Finance.Application.Invoices;
 
-public sealed class FinanceFailure(int status, string message) : Exception(message)
-{ public int Status { get; } = status; }
 public sealed record InvoicePage(IReadOnlyList<InvoiceResponse> Items, int Total, int Page, int PageSize);
 public interface IInvoiceManagementStore
 {
@@ -14,22 +12,24 @@ public interface IInvoiceManagementStore
     Task<Invoice> MarkPaidAsync(Guid id, Guid confirmedBy, DateTime paidAt, CancellationToken ct);
 }
 
-public sealed class InvoiceManagement(IInvoiceManagementStore store, IEventBus events, TimeProvider clock)
+public sealed class InvoiceManagement(IInvoiceManagementStore store, InvoiceQuery query, IEventBus events, TimeProvider clock)
 {
-    public async Task<InvoiceResponse> GetAsync(Guid id, Guid? student, CancellationToken ct)
+    public async Task<InvoiceResponse> GetAsync(Guid id, CancellationToken ct)
     {
+        var student = await query.StudentFilterAsync(null, ct);
         var x = await store.FindAsync(id, ct);
         if (x is null || (student.HasValue && student != x.StudentId)) throw new FinanceFailure(404, "Invoice not found.");
         return InvoiceQuery.Response(x);
     }
-    public Task<InvoicePage> ListAsync(Guid? student, int page, int size, CancellationToken ct)
+    public async Task<InvoicePage> ListAsync(Guid? filter, int page, int size, CancellationToken ct)
     {
+        var student = await query.StudentFilterAsync(filter, ct);
         if (page < 1 || page > 1_000_000 || size < 1) throw new FinanceFailure(400, "Invalid pagination.");
-        return store.ListAsync(student, page, Math.Min(size, 100), ct);
+        return await store.ListAsync(student, page, Math.Min(size, 100), ct);
     }
-    public async Task<InvoiceResponse> MarkPaidAsync(Guid id, Guid actor, CancellationToken ct)
+    public async Task<InvoiceResponse> MarkPaidAsync(Guid id, CancellationToken ct)
     {
-        if (actor == Guid.Empty) throw new FinanceFailure(403, "Invalid user subject.");
+        var actor = await query.EnsureManagerAsync(ct);
         var utc = clock.GetUtcNow().UtcDateTime;
         var value = await store.MarkPaidAsync(id, actor, new(utc.Ticks / 10 * 10, DateTimeKind.Utc), ct);
         await PublishAsync(value, ct);
@@ -37,6 +37,7 @@ public sealed class InvoiceManagement(IInvoiceManagementStore store, IEventBus e
     }
     public async Task ReplayPaymentAsync(Guid id, CancellationToken ct)
     {
+        await query.EnsureManagerAsync(ct);
         var value = await store.FindAsync(id, ct) ?? throw new FinanceFailure(404, "Invoice not found.");
         if (value.Status != "Paid") throw new FinanceFailure(409, "Invoice has not been paid.");
         await PublishAsync(value, ct);

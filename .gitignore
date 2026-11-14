@@ -15,6 +15,7 @@ appsettings.*.local.json
 .env
 .env.*
 !.env.example
+!.env.minio.example
 
 ## Frontend (src/web)
 node_modules/
