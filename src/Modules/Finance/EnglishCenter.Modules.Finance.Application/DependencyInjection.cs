@@ -11,6 +11,7 @@ public static class DependencyInjection
     public static IServiceCollection AddFinanceApplication(this IServiceCollection services)
     {
         services.AddScoped<InvoiceQuery>();
+        services.AddScoped<InvoiceManagement>();
         services.AddIntegrationEventHandler<StudentEnrolledIntegrationEvent, StudentEnrolledIntegrationEventHandler>();
         return services;
     }

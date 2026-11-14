@@ -30,7 +30,7 @@ using Xunit;
 
 namespace EnglishCenter.IntegrationTests;
 
-public sealed class Tv3Week3Tests : IAsyncLifetime
+public sealed partial class Tv3Week3Tests : IAsyncLifetime
 {
     private const string Password = "Test-password-123!";
     private const string Url = "/api/enrollment/enrollments";
@@ -404,17 +404,26 @@ public sealed class Tv3Week3Tests : IAsyncLifetime
         }
     }
 
-    private sealed class Week3Factory : WebApplicationFactory<Program>, IIntegrationEventHandler<InvoiceCreatedIntegrationEvent>
+    private sealed class Week3Factory : WebApplicationFactory<Program>, IIntegrationEventHandler<InvoiceCreatedIntegrationEvent>,
+        IIntegrationEventHandler<EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents.WarningIssuedIntegrationEvent>,
+        IIntegrationEventHandler<InvoicePaidIntegrationEvent>
     {
         private readonly string? _server = Environment.GetEnvironmentVariable("TV3_POSTGRES");
         private readonly string _database = "tv3_test_" + Guid.NewGuid().ToString("N");
         private readonly string _temp = Path.Combine(Path.GetTempPath(), "tv3-week3-" + Guid.NewGuid().ToString("N"));
         public bool Postgres => !string.IsNullOrWhiteSpace(_server);
+        public TestClock Clock { get; } = new();
         public FailSave EnrollmentSave { get; } = new();
         public FailSave FinanceSave { get; } = new();
         public System.Collections.Concurrent.ConcurrentBag<InvoiceCreatedIntegrationEvent> Invoices { get; } = [];
         public Task HandleAsync(InvoiceCreatedIntegrationEvent e, CancellationToken cancellationToken = default)
         { Invoices.Add(e); return Task.CompletedTask; }
+        public System.Collections.Concurrent.ConcurrentBag<EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents.WarningIssuedIntegrationEvent> WarningEvents { get; } = [];
+        public System.Collections.Concurrent.ConcurrentBag<InvoicePaidIntegrationEvent> PaymentEvents { get; } = [];
+        public Task HandleAsync(EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents.WarningIssuedIntegrationEvent e, CancellationToken cancellationToken = default)
+        { WarningEvents.Add(e); return Task.CompletedTask; }
+        public Task HandleAsync(InvoicePaidIntegrationEvent e, CancellationToken cancellationToken = default)
+        { PaymentEvents.Add(e); return Task.CompletedTask; }
 
         public async Task CreateDatabaseAsync()
         {
@@ -439,7 +448,10 @@ public sealed class Tv3Week3Tests : IAsyncLifetime
             {
                 Replace<IdentityDbContext>(services, "identity"); Replace<AcademicDbContext>(services, "academic");
                 Replace<EnrollmentDbContext>(services, "enrollment", EnrollmentSave); Replace<FinanceDbContext>(services, "finance", FinanceSave);
+                services.AddSingleton<TimeProvider>(Clock);
                 services.AddSingleton<IIntegrationEventHandler<InvoiceCreatedIntegrationEvent>>(this);
+                services.AddSingleton<IIntegrationEventHandler<EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents.WarningIssuedIntegrationEvent>>(this);
+                services.AddSingleton<IIntegrationEventHandler<InvoicePaidIntegrationEvent>>(this);
             });
         }
         private void Replace<T>(IServiceCollection services, string schema, IInterceptor? interceptor = null) where T : DbContext
@@ -470,5 +482,11 @@ public sealed class Tv3Week3Tests : IAsyncLifetime
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(_temp, true);
         }
+    }
+
+    private sealed class TestClock : TimeProvider
+    {
+        public DateTimeOffset? UtcNow { get; set; }
+        public override DateTimeOffset GetUtcNow() => UtcNow ?? base.GetUtcNow();
     }
 }

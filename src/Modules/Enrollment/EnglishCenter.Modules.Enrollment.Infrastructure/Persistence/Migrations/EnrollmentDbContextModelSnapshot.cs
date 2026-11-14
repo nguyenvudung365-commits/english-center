@@ -23,6 +23,117 @@ namespace EnglishCenter.Modules.Enrollment.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.PlacementTests.PlacementTest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Location")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("location");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("mode");
+
+                    b.Property<DateTime>("ScheduledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("scheduled_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("student_id");
+
+                    b.Property<Guid?>("TeacherId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("teacher_id");
+
+                    b.Property<string>("TestName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("test_name");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TeacherId");
+
+                    b.HasIndex("StudentId", "ScheduledAt");
+
+                    b.ToTable("placement_tests", "enrollment", t =>
+                        {
+                            t.HasCheckConstraint("ck_placement_mode", "mode IN ('Offline', 'Online')");
+
+                            t.HasCheckConstraint("ck_placement_status", "status IN ('Pending', 'Done', 'Cancelled')");
+                        });
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.PlacementTests.TestTeacher", b =>
+                {
+                    b.Property<Guid>("TeacherId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("teacher_id");
+
+                    b.HasKey("TeacherId");
+
+                    b.ToTable("test_teachers", "enrollment");
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.AttendanceSnapshot", b =>
+                {
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("student_id");
+
+                    b.Property<Guid>("EnrollmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("enrollment_id");
+
+                    b.Property<DateTime>("RecordedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("status");
+
+                    b.HasKey("SessionId", "StudentId");
+
+                    b.HasIndex("EnrollmentId");
+
+                    b.ToTable("attendance_snapshots", "enrollment", t =>
+                        {
+                            t.HasCheckConstraint("ck_attendance_status", "status IN ('Present', 'AbsentUnexcused', 'AbsentExcused', 'Late', 'LateOver20Min', 'LeftEarly')");
+                        });
+                });
+
             modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.ClassSnapshot", b =>
                 {
                     b.Property<Guid>("ClassId")
@@ -67,6 +178,27 @@ namespace EnglishCenter.Modules.Enrollment.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_class_tuition", "tuition_fee >= 0");
                         });
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.MissedAssignment", b =>
+                {
+                    b.Property<Guid>("AssignmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("assignment_id");
+
+                    b.Property<Guid>("EnrollmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("enrollment_id");
+
+                    b.Property<DateTime>("RecordedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at");
+
+                    b.HasKey("AssignmentId", "EnrollmentId");
+
+                    b.HasIndex("EnrollmentId");
+
+                    b.ToTable("missed_assignments", "enrollment");
                 });
 
             modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.Registration", b =>
@@ -164,6 +296,75 @@ namespace EnglishCenter.Modules.Enrollment.Infrastructure.Persistence.Migrations
                     b.ToTable("students", "enrollment");
                 });
 
+            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.Warning", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("EnrollmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("enrollment_id");
+
+                    b.Property<DateTime>("IssuedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("issued_at");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("message");
+
+                    b.Property<string>("WarningType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("warning_type");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EnrollmentId", "WarningType")
+                        .IsUnique();
+
+                    b.ToTable("warnings", "enrollment", t =>
+                        {
+                            t.HasCheckConstraint("ck_warning_type", "warning_type IN ('Absence', 'Late', 'SkippedAssignment')");
+                        });
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.PlacementTests.PlacementTest", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Enrollment.Domain.Registrations.Student", null)
+                        .WithMany()
+                        .HasForeignKey("StudentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("EnglishCenter.Modules.Enrollment.Domain.PlacementTests.TestTeacher", null)
+                        .WithMany()
+                        .HasForeignKey("TeacherId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.AttendanceSnapshot", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Enrollment.Domain.Registrations.Registration", null)
+                        .WithMany()
+                        .HasForeignKey("EnrollmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.MissedAssignment", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Enrollment.Domain.Registrations.Registration", null)
+                        .WithMany()
+                        .HasForeignKey("EnrollmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.Registration", b =>
                 {
                     b.HasOne("EnglishCenter.Modules.Enrollment.Domain.Registrations.ClassSnapshot", null)
@@ -175,6 +376,15 @@ namespace EnglishCenter.Modules.Enrollment.Infrastructure.Persistence.Migrations
                     b.HasOne("EnglishCenter.Modules.Enrollment.Domain.Registrations.Student", null)
                         .WithMany()
                         .HasForeignKey("StudentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.Warning", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Enrollment.Domain.Registrations.Registration", null)
+                        .WithMany()
+                        .HasForeignKey("EnrollmentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

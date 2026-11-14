@@ -23,7 +23,7 @@ English Center hướng tới quản lý toàn bộ luồng vận hành đào t�
 
 Dự án sử dụng **một ứng dụng triển khai, nhiều module nghiệp vụ**. Mỗi module có ranh giới dữ liệu và các tầng riêng, giúp các thành viên phát triển song song mà vẫn giữ khả năng kiểm thử và tích hợp.
 
-> Dự án đang phát triển. Nhánh TV3 đã tích hợp `develop` tại `fc3542d`, gồm phần TV1 tuần 3 trong [PR #8](https://github.com/nguyenvudung365-commits/english-center/pull/8). Phần ghi danh và hóa đơn tuần 3 được mô tả tại [TV3_WEEK3.md](TV3_WEEK3.md). Việc có cấu hình CI/CD không đồng nghĩa hệ thống đã được triển khai production.
+> Dự án đang phát triển. Nhánh TV3 đã tích hợp `develop` tại `f4489ef`, gồm frontend và cập nhật Identity. Xem [ghi danh/hóa đơn tuần 3](TV3_WEEK3.md), [kiểm thử và bàn giao tuần 4](TV3_WEEK4.md), [giới hạn/hẹn test/cảnh báo/thanh toán tuần 5](TV3_WEEK5.md). Việc có cấu hình CI/CD không đồng nghĩa hệ thống đã được triển khai production.
 
 ## Trạng thái
 
@@ -34,8 +34,10 @@ Dự án sử dụng **một ứng dụng triển khai, nhiều module nghiệp 
 | TV1 tuần 3 — PR #8 | Bổ sung `ICurrentUser`, đọc claim an toàn, chuẩn phản hồi lỗi tại Host, API phát lại sự kiện tài khoản và kiểm thử phân quyền/hợp đồng lỗi |
 | Academic | Đã tích hợp US-07: tạo/đọc lớp, danh mục khóa học mẫu, danh sách giáo viên đồng bộ từ `UserRegistered`, validation, phân quyền và event `ClassCreated` |
 | Enrollment → Finance | US-12/US-23: lưu ghi danh và hóa đơn vào database, chặn trùng/đầy/kết thúc, transaction sĩ số, hóa đơn duy nhất theo EnrollmentId, đúng học phí/hạn; có replay đối soát và danh sách lớp của học viên |
-| Kiểm thử | Bản TV3 tuần 3 tích hợp develop `fc3542d`, ngày 05/11/2026: **281 passed, 0 failed, 0 skipped**, gồm PostgreSQL thật của Identity và TV3 |
-| Nghiệp vụ tiếp theo | Lịch học/lịch dạy, xác nhận thanh toán, bài tập, lưu file và thông báo tiếp tục được phát triển |
+| Kiểm thử | Hồi quy cục bộ trên TV3 ngày 14/11/2026: **331/331 ca đạt** trên PostgreSQL 16; SQLite **320 ca đạt, 11 ca PostgreSQL bỏ qua** |
+| TV3 tuần 4–5 | Test hợp đồng Academic; API giới hạn/bộ đếm/cảnh báo, hẹn test, xác nhận thanh toán và danh sách hóa đơn đúng người; chưa nối các màn hình frontend mới |
+| TV3 tuần 6–7 | API số lớp đã hoàn thành theo học viên, kiểm thử ghi danh → hóa đơn/cảnh báo và [kịch bản demo](TV3_WEEK6_7.md) |
+| Nghiệp vụ tiếp theo | API điểm danh/bài tập của TV2, lưu file và thông báo của TV4 tiếp tục được phát triển |
 | Docker và CI/CD | `develop` đã có Dockerfile multi-stage, Compose, GitHub Actions, Jenkinsfile và script smoke container; xem phạm vi và giới hạn bên dưới |
 | PostgreSQL | Identity/Academic/Enrollment/Finance có migration; CI đã cấu hình server kiểm thử riêng và bật cả test PostgreSQL của Identity lẫn TV3 |
 
@@ -294,7 +296,7 @@ dotnet test EnglishCenter.sln -c Release
 | ArchitectureTests | Ranh giới module, dependency và ProjectReference |
 | BuildingBlocks.Tests | Event Bus, DI scope và hành vi xử lý handler |
 | Academic.Tests | Domain/Application tạo lớp, validation và handler đồng bộ giáo viên |
-| IntegrationTests | Host, ping, schema, Identity/Academic qua HTTP và chống ghi nhận trùng EnrollmentId trong recorder Finance |
+| IntegrationTests | Identity/Academic/Enrollment/Finance qua HTTP, quyền sở hữu, migration, snapshot/cảnh báo và thanh toán; hợp đồng sự kiện, chống trùng và đồng thời PostgreSQL |
 
 Auth test dùng SQLite trong bộ nhớ và không yêu cầu PostgreSQL ngoài. Kiểm tra SQL migration không thay thế việc chạy migration, constraint và luồng nghiệp vụ trên PostgreSQL thật.
 
@@ -329,7 +331,7 @@ main                         Bản ổn định
 3. Mở Pull Request vào `develop`, mô tả thay đổi, cách kiểm tra và giới hạn còn lại bằng tiếng Việt.
 4. Nhờ thành viên khác review trước khi merge. Cuối sprint tích hợp từ `develop` vào `main`.
 
-Identity, US-07, test TV3 tuần 1–2 và cấu hình CI/CD đã có trên `develop`; phần TV1 tuần 3 được bàn giao qua PR #8. Tạo nhánh từ `develop` đã cập nhật để dùng đúng contract sau khi PR được merge. Ghi riêng kết quả local, CI và kiểm chứng PostgreSQL/container trong PR. Test TV3 xác minh recorder hiện có, không đánh dấu US-12/US-23 (ghi danh/hóa đơn thực tế) đã hoàn thành.
+Nhánh TV3 đã tích hợp `develop` tại `f4489ef`; phần ghi danh/hóa đơn thực tế và API tuần 5 được bàn giao trong các tài liệu TV3 ở trên. Ghi riêng kết quả local, CI và kiểm chứng PostgreSQL/container trong PR. Tuần 4 mới chuẩn bị hợp đồng/test phía nhận vì TV2 chưa bàn giao API; không coi kiểm thử hợp đồng là đã kiểm thử nộp/chấm bài qua HTTP.
 
 ## Nhóm phát triển
 

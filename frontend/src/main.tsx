@@ -717,12 +717,12 @@ function App() {
                             {
                                 path: "/enrollment",
                                 title: "Ghi danh & chuyển lớp",
-                                text: "Enrollment chưa có API tra cứu hoặc gửi ghi danh, chuyển lớp và hủy ghi danh. Trang này chưa thể gửi, lưu hay xác nhận yêu cầu. Vui lòng liên hệ giáo vụ.",
+                                text: "Trang ghi danh đang được hoàn thiện. Vui lòng liên hệ giáo vụ để được hỗ trợ ghi danh, chuyển lớp hoặc hủy ghi danh.",
                             },
                             {
                                 path: "/invoices",
                                 title: "Hóa đơn & học phí",
-                                text: "Finance chưa có API truy vấn hóa đơn, học phí hoặc thanh toán. Trang này không tạo hóa đơn, thu tiền hay xác nhận đã thanh toán; chưa có số dư hoặc tổng tiền để hiển thị.",
+                                text: "Tra cứu hóa đơn trên giao diện đang được hoàn thiện. Vui lòng liên hệ giáo vụ để kiểm tra học phí hoặc xác nhận thanh toán.",
                             },
                             {
                                 path: "/attendance",

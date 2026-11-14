@@ -44,6 +44,12 @@ internal sealed class EnrollmentStore(EnrollmentDbContext db) : IEnrollmentStore
 
     public Task<Registration?> FindAsync(Guid id, CancellationToken ct) => db.Enrollments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
 
+    public Task<int> CountCompletedClassesAsync(Guid studentId, DateOnly today, CancellationToken ct) =>
+        (from enrollment in db.Enrollments
+         join snapshot in db.Classes on enrollment.ClassId equals snapshot.ClassId
+         where enrollment.StudentId == studentId && enrollment.Status == "Active" && snapshot.EndDate < today
+         select enrollment.Id).CountAsync(ct);
+
     public async Task<Registration> EnrollAsync(EnrollRequest request, DateTime now, DateOnly today, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(ct);

@@ -27,6 +27,7 @@ public sealed class FinanceDbContext : DbContext
             b.Property(x => x.InvoiceNo).HasMaxLength(32); b.Property(x => x.Status).HasMaxLength(20);
             b.Property(x => x.Amount).HasPrecision(12, 0);
             b.Property(x => x.IssuedAt).HasConversion(x => x, x => DateTime.SpecifyKind(x, DateTimeKind.Utc));
+            b.Property(x => x.PaidAt).HasConversion(x => x, x => x.HasValue ? DateTime.SpecifyKind(x.Value, DateTimeKind.Utc) : (DateTime?)null);
         });
         foreach (var entity in modelBuilder.Model.GetEntityTypes())
             foreach (var p in entity.GetProperties())

@@ -94,4 +94,4 @@ Kiểm chứng bổ sung ngày 10/11/2026 cho yêu cầu review backfill lớp: 
 
 Event bus trong bộ nhớ vẫn bắt lỗi handler, không có outbox/retry tự động. 201 chỉ xác nhận ghi danh đã lưu; 202 chỉ xác nhận yêu cầu replay đã chạy. Sau replay phải đọc API Finance để xác nhận hóa đơn. Đã kiểm thử Finance lỗi rồi phục hồi bằng replay; chưa bảo đảm phát InvoiceCreated khi tiến trình chết ngay sau commit hóa đơn.
 
-Phần Academic bổ sung chỉ phục vụ danh sách lớp theo ghi danh. Buổi học, lịch học/lịch dạy và kiểm tra trùng giờ thuộc TV2, chưa có trong repository này; chưa tuyên bố demo lịch học hoàn tất. Xác nhận thanh toán US-24 thuộc giai đoạn sau.
+Phần Academic bổ sung chỉ phục vụ danh sách lớp theo ghi danh. Buổi học, lịch học/lịch dạy và kiểm tra trùng giờ thuộc TV2, chưa có trong repository này; chưa tuyên bố demo lịch học hoàn tất. Xác nhận thanh toán US-24 được bổ sung trong [tuần 5](TV3_WEEK5.md).
