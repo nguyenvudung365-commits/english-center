@@ -58,4 +58,13 @@ public sealed class Registration
         MaxAbsences = absences; MaxLates = lates; MaxSkippedAssignments = skipped;
     }
     public static bool ValidAmount(decimal value) => value >= 0 && value <= 999_999_999_999m && decimal.Truncate(value) == value;
+
+    public void SetLimits(int absences, int lates, int skipped)
+    {
+        if (absences < 0 || lates < 0 || skipped < 0) throw new ArgumentOutOfRangeException(nameof(absences));
+        MaxAbsences = absences; MaxLates = lates; MaxSkippedAssignments = skipped;
+    }
+
+    public void SetCounts(int absences, int lates, int skipped)
+    { AbsenceCount = absences; LateCount = lates; SkippedAssignmentCount = skipped; }
 }

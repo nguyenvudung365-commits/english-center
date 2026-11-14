@@ -15,6 +15,7 @@ public sealed class EnrollmentFailure(int status, string message) : Exception(me
 public sealed record EnrollRequest(Guid StudentId, Guid ClassId, int? MaxAbsences, int? MaxLates, int? MaxSkippedAssignments);
 public sealed record EnrollmentResponse(Guid Id, Guid StudentId, Guid ClassId, string Status, DateTime EnrolledAtUtc,
     decimal TuitionFee, int MaxAbsences, int MaxLates, int MaxSkippedAssignments, bool IsActive = true);
+public sealed record EnrollmentStatisticsResponse(int CompletedClasses);
 
 public interface IEnrollmentStore
 {
@@ -25,19 +26,34 @@ public interface IEnrollmentStore
     Task<Registration?> FindAsync(Guid classId, Guid studentId, CancellationToken ct);
     Task<IReadOnlyList<Registration>> ListAsync(Guid classId, CancellationToken ct);
     Task<Registration> SetActiveAsync(Guid id, bool active, CancellationToken ct);
+    Task<int> CountCompletedClassesAsync(Guid studentId, DateOnly today, CancellationToken ct);
 }
 
 public sealed class EnrollmentService(IEnrollmentStore store, IEventBus events, TimeProvider clock,
     ICurrentUser current, IAccountAccess accounts)
 {
-    internal async Task EnsureManagerAsync(CancellationToken ct)
+    internal async Task<Guid> EnsureManagerAsync(CancellationToken ct)
     {
-        if (!current.IsAuthenticated || current.UserId is null || current.UserId == Guid.Empty)
-            throw new EnrollmentFailure(401, "Authentication required.");
+        var userId = await EnsureReaderAsync(ct);
         if (current.Role is not (Roles.Admin or Roles.Staff))
             throw new EnrollmentFailure(403, "Only staff manage enrollment.");
-        if (!await accounts.IsActiveInRoleAsync(current.UserId.Value, current.Role, ct))
-            throw new EnrollmentFailure(403, "An active staff account with the current role is required.");
+        return userId;
+    }
+
+    private async Task<Guid> EnsureReaderAsync(CancellationToken ct)
+    {
+        if (!current.IsAuthenticated || current.UserId is not { } userId || userId == Guid.Empty)
+            throw new EnrollmentFailure(401, "Authentication required.");
+        if (current.Role is not (Roles.Admin or Roles.Staff or Roles.Student) ||
+            !await accounts.IsActiveInRoleAsync(userId, current.Role, ct))
+            throw new EnrollmentFailure(403, "An active account with the current role is required.");
+        return userId;
+    }
+
+    internal async Task<Guid?> StudentFilterAsync(Guid? filter, CancellationToken ct)
+    {
+        var userId = await EnsureReaderAsync(ct);
+        return current.Role == Roles.Student ? userId : filter;
     }
 
     public async Task<EnrollmentResponse> EnrollAsync(EnrollRequest request, CancellationToken ct)
@@ -49,23 +65,25 @@ public sealed class EnrollmentService(IEnrollmentStore store, IEventBus events, 
         var now = clock.GetUtcNow();
         // PostgreSQL timestamptz lưu microsecond; phản hồi POST và GET phải cùng độ chính xác.
         var enrolledAt = new DateTime(now.UtcDateTime.Ticks / 10 * 10, DateTimeKind.Utc);
-        var value = await store.EnrollAsync(request, enrolledAt,
-            DateOnly.FromDateTime(now.ToOffset(TimeSpan.FromHours(7)).DateTime), ct);
+        var value = await store.EnrollAsync(request, enrolledAt, LocalDate(now), ct);
         await PublishAsync(value, ct);
         return Response(value);
     }
 
     public async Task<EnrollmentResponse> GetAsync(Guid id, CancellationToken ct)
     {
-        if (!current.IsAuthenticated || current.UserId is null || current.UserId == Guid.Empty)
-            throw new EnrollmentFailure(401, "Authentication required.");
-        if (current.Role is not (Roles.Admin or Roles.Staff or Roles.Student) ||
-            !await accounts.IsActiveInRoleAsync(current.UserId.Value, current.Role, ct))
-            throw new EnrollmentFailure(403, "An active account with the current role is required.");
-        Guid? student = current.Role == Roles.Student ? current.UserId : null;
+        var student = await StudentFilterAsync(null, ct);
         var value = await store.FindAsync(id, ct);
         if (value is null || (student.HasValue && student != value.StudentId)) throw new EnrollmentFailure(404, "Enrollment not found.");
         return Response(value);
+    }
+
+    public async Task<EnrollmentStatisticsResponse> GetStatisticsAsync(CancellationToken ct)
+    {
+        var studentId = await EnsureReaderAsync(ct);
+        if (current.Role != Roles.Student)
+            throw new EnrollmentFailure(403, "Only students can view their personal statistics.");
+        return new(await store.CountCompletedClassesAsync(studentId, LocalDate(clock.GetUtcNow()), ct));
     }
 
     public async Task ReplayAsync(Guid id, CancellationToken ct)
@@ -86,4 +104,6 @@ public sealed class EnrollmentService(IEnrollmentStore store, IEventBus events, 
     internal static EnrollmentResponse Response(Registration x) => new(x.Id, x.StudentId, x.ClassId, x.Status,
         x.EnrolledAt, x.TuitionFee, x.MaxAbsences, x.MaxLates, x.MaxSkippedAssignments,
         x.Status == "Active" && x.IsActive);
+    private static DateOnly LocalDate(DateTimeOffset instant) =>
+        DateOnly.FromDateTime(instant.ToOffset(TimeSpan.FromHours(7)).DateTime);
 }
