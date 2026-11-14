@@ -14,6 +14,9 @@ public sealed class AcademicDbContext : DbContext
     public DbSet<EnglishCenter.Modules.Academic.Domain.Assignments.Assignment> Assignments => Set<EnglishCenter.Modules.Academic.Domain.Assignments.Assignment>();
     public DbSet<EnglishCenter.Modules.Academic.Domain.Assignments.Submission> Submissions => Set<EnglishCenter.Modules.Academic.Domain.Assignments.Submission>();
     public DbSet<ClassStudent> ClassStudents => Set<ClassStudent>();
+    public DbSet<EnglishCenter.Modules.Academic.Domain.Assignments.SubmissionGrade> SubmissionGrades => Set<EnglishCenter.Modules.Academic.Domain.Assignments.SubmissionGrade>();
+    public DbSet<EnglishCenter.Modules.Academic.Domain.Assignments.AssignmentRecipient> AssignmentRecipients => Set<EnglishCenter.Modules.Academic.Domain.Assignments.AssignmentRecipient>();
+    public DbSet<EnglishCenter.Modules.Academic.Domain.Practice.PracticeExercise> PracticeExercises => Set<EnglishCenter.Modules.Academic.Domain.Practice.PracticeExercise>();
 
     public AcademicDbContext(DbContextOptions<AcademicDbContext> options) : base(options)
     {

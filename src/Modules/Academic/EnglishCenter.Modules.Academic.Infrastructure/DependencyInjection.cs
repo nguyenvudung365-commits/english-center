@@ -36,8 +36,10 @@ public static class DependencyInjection
             throw new InvalidOperationException("Submission limits must be 1–5 files and 1–52428800 total bytes.");
         services.AddSingleton(new EnglishCenter.Modules.Academic.Application.Assignments.SubmissionLimits(maxFiles, maxTotalBytes));
         services.AddScoped<IClassRoster, ClassRoster>();
+        services.AddScoped<EnglishCenter.Modules.Academic.Application.Practice.IPracticeStore, PracticeStore>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddHostedService<AcademicStartup>();
+        services.AddHostedService<CourseworkWorker>();
 
         return services;
     }
