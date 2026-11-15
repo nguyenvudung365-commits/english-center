@@ -8,10 +8,11 @@ using EnglishCenter.Modules.Academic.Domain.Teachers;
 
 namespace EnglishCenter.Modules.Academic.Application.Classes;
 
-public sealed partial class ClassService(IAcademicStore store, IEventBus events, TimeProvider clock)
+public sealed partial class ClassService(IAcademicStore store, IEventBus events, TimeProvider clock, ClassAccess access)
 {
     public async Task<ClassResponse> CreateAsync(CreateClassRequest request, CancellationToken ct)
     {
+        await access.RequireManagerAsync(ct);
         var errors = Validate(request, out var classType);
         if (errors.Count > 0) throw Invalid(errors);
 
@@ -43,12 +44,14 @@ public sealed partial class ClassService(IAcademicStore store, IEventBus events,
 
     public async Task ReplayAsync(Guid id, CancellationToken ct)
     {
+        await access.RequireManagerAsync(ct);
         var found = await store.FindClassAsync(id, ct) ?? throw new AcademicFailure(404, "Class not found.");
         await PublishClassAsync(found, ct);
     }
 
     public async Task<RepublishClassesResponse> RepublishAsync(CancellationToken ct)
     {
+        await access.RequireManagerAsync(ct);
         var classes = await store.ClassesAsync(ct);
         foreach (var value in classes)
             await PublishClassAsync(value, ct);
@@ -62,17 +65,52 @@ public sealed partial class ClassService(IAcademicStore store, IEventBus events,
 
     public async Task<ClassResponse> GetAsync(Guid id, CancellationToken ct)
     {
+        await access.RequireReadAsync(id, ct);
         var found = await store.FindClassAsync(id, ct) ?? throw new AcademicFailure(404, "Class not found.");
         var course = await store.FindCourseAsync(found.CourseId, ct);
         var teacher = await store.FindTeacherAsync(found.TeacherId, ct);
         return ToResponse(found, course, teacher);
     }
 
-    public async Task<IReadOnlyList<CourseResponse>> CoursesAsync(CancellationToken ct) =>
-        (await store.CoursesAsync(ct)).Select(x => new CourseResponse(x.Id, x.Code, x.Name, x.Description)).ToList();
+    public async Task<IReadOnlyList<CourseResponse>> CoursesAsync(CancellationToken ct)
+    {
+        await access.RequireManagerAsync(ct);
+        return (await store.CoursesAsync(ct)).Select(x => new CourseResponse(x.Id, x.Code, x.Name, x.Description)).ToList();
+    }
 
-    public async Task<IReadOnlyList<TeacherResponse>> TeachersAsync(CancellationToken ct) =>
-        (await store.TeachersAsync(ct)).Select(x => new TeacherResponse(x.Id, x.FullName, x.Email)).ToList();
+    public async Task<IReadOnlyList<TeacherResponse>> TeachersAsync(CancellationToken ct)
+    {
+        await access.RequireManagerAsync(ct);
+        return (await store.TeachersAsync(ct)).Select(x => new TeacherResponse(x.Id, x.FullName, x.Email)).ToList();
+    }
+
+    public async Task<ClassPageResponse> ListAsync(ClassListQuery query, CancellationToken ct)
+    {
+        var visible = await access.VisibleClassesAsync(ct);
+        var errors = new Dictionary<string, string[]>();
+        var search = query.Search?.Trim();
+        if (search?.Length > 200) errors[nameof(query.Search)] = ["Search must not exceed 200 characters."];
+        if (query.Page < 1) errors[nameof(query.Page)] = ["Page must be at least 1."];
+        if (query.PageSize is < 1 or > 100) errors[nameof(query.PageSize)] = ["Page size must be between 1 and 100."];
+        ClassStatus? status = null;
+        if (query.Status is not null)
+        {
+            var name = Enum.GetNames<ClassStatus>().FirstOrDefault(x => string.Equals(x, query.Status, StringComparison.OrdinalIgnoreCase));
+            if (name is null) errors[nameof(query.Status)] = ["Status must be Upcoming, Ongoing or Finished."];
+            else status = Enum.Parse<ClassStatus>(name);
+        }
+        if (errors.Count > 0) throw Invalid(errors);
+        var today = AcademicCalendar.Today(clock);
+        var filtered = visible.Where(x => (string.IsNullOrEmpty(search) ||
+                x.Code.Contains(search, StringComparison.OrdinalIgnoreCase) || x.Name.Contains(search, StringComparison.OrdinalIgnoreCase)) &&
+            (status is null || x.GetStatus(today) == status)).OrderBy(x => x.Code, StringComparer.Ordinal).ThenBy(x => x.Id).ToList();
+        var offset = ((long)query.Page - 1) * query.PageSize;
+        var page = offset >= filtered.Count ? [] : filtered.Skip((int)offset).Take(query.PageSize).ToList();
+        var courses = (await store.CoursesAsync(ct)).ToDictionary(x => x.Id);
+        var teachers = (await store.TeachersAsync(ct)).ToDictionary(x => x.Id);
+        return new(page.Select(x => ToResponse(x, courses.GetValueOrDefault(x.CourseId), teachers.GetValueOrDefault(x.TeacherId))).ToList(),
+            query.Page, query.PageSize, filtered.Count);
+    }
 
     private ClassResponse ToResponse(Class value, Course? course, Teacher? teacher) =>
         new(value.Id, value.Code, value.Name, value.CourseId, course?.Code ?? string.Empty, course?.Name ?? string.Empty,

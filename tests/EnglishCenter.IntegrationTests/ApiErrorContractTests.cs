@@ -47,6 +47,7 @@ public sealed class ApiErrorContractTests
         private static Exception Boom() => new InvalidOperationException(SecretMessage);
         public Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken ct) => throw Boom();
         public Task<User?> FindUserAsync(Guid id, CancellationToken ct) => throw Boom();
+        public Task<bool> IsActiveInRoleAsync(Guid id, string? expectedRole, CancellationToken ct) => throw Boom();
         public Task<RefreshSession?> FindSessionAsync(string hash, CancellationToken ct) => throw Boom();
         public Task<IReadOnlyList<RefreshSession>> SessionsAsync(Guid userId, CancellationToken ct) => throw Boom();
         public Task<IReadOnlyList<User>> UsersAsync(string? role, CancellationToken ct) => throw Boom();

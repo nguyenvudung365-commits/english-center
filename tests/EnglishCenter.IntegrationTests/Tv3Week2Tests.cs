@@ -74,7 +74,8 @@ public sealed class Tv3Week2Tests : IAsyncLifetime
         foreach (var lookup in new[] { "/api/academic/courses", "/api/academic/teachers" })
             Assert.Equal(readExpected, (await _client.GetAsync(lookup)).StatusCode);
         if (expected != HttpStatusCode.Created)
-            Assert.Equal(expected, (await _client.GetAsync($"{Url}/{Guid.NewGuid()}")).StatusCode);
+            Assert.Equal(role is Roles.Student or Roles.Teacher ? HttpStatusCode.NotFound : expected,
+                (await _client.GetAsync($"{Url}/{Guid.NewGuid()}")).StatusCode);
     }
 
     [Theory]

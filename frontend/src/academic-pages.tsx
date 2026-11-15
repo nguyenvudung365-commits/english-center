@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ApiError, getSession, getSessionGeneration, identity } from "./api";
 import {
@@ -7,11 +7,13 @@ import {
     getClass,
     isAcademicId,
     listCourses,
+    listClasses,
     listTeachers,
     validateClassDraft,
     type ClassDraft,
+    type ClassQuery,
 } from "./academic";
-import { ErrorMessage, PageHeading, Unavailable } from "./ui";
+import { ErrorMessage, PageHeading } from "./ui";
 
 export function ManagerOnly({ children }: { children: ReactNode }) {
     const user = identity(getSession());
@@ -36,6 +38,8 @@ export function ManagerOnly({ children }: { children: ReactNode }) {
     return children;
 }
 function AcademicLinks() {
+    const user = identity(getSession());
+    const manager = user && canManageAcademic(user.role);
     return (
         <div
             className="academic-actions"
@@ -45,6 +49,8 @@ function AcademicLinks() {
             <Link className="secondary inline" to="/classes">
                 Tra cứu lớp
             </Link>
+            <Link className="secondary inline" to="/schedule">Lịch học</Link>
+            {manager && <>
             <Link className="primary inline" to="/classes/new">
                 Tạo lớp học
             </Link>
@@ -54,90 +60,116 @@ function AcademicLinks() {
             <Link className="secondary inline" to="/teachers">
                 Giáo viên
             </Link>
+            </>}
         </div>
     );
 }
 // Cleanup ignores obsolete reads; the generation check also covers logout while JSON is parsing.
-function useRead<T>(load: () => Promise<T>) {
+export function useRead<T>(load: () => Promise<T>) {
     const [attempt, setAttempt] = useState(0);
     const [state, setState] = useState<{
         data: T | null;
         loading: boolean;
         error: unknown;
-    }>({ data: null, loading: true, error: null });
+        load: (() => Promise<T>) | null;
+        attempt: number;
+        generation: number;
+    }>({ data: null, loading: true, error: null, load: null, attempt: -1, generation: -1 });
     useEffect(() => {
         let active = true;
         const generation = getSessionGeneration();
-        setState({ data: null, loading: true, error: null });
+        const scope = { load, attempt, generation };
+        setState({ data: null, loading: true, error: null, ...scope });
         void load().then(
             (data) => {
                 if (active && generation === getSessionGeneration())
-                    setState({ data, loading: false, error: null });
+                    setState({ data, loading: false, error: null, ...scope });
             },
             (error) => {
                 if (active && generation === getSessionGeneration())
-                    setState({ data: null, loading: false, error });
+                    setState({ data: null, loading: false, error, ...scope });
             },
         );
         return () => {
             active = false;
         };
     }, [load, attempt]);
-    return { ...state, retry: () => setAttempt((value) => value + 1) };
+    const current = state.load === load && state.attempt === attempt && state.generation === getSessionGeneration();
+    return {
+        data: current ? state.data : null,
+        loading: current ? state.loading : true,
+        error: current ? state.error : null,
+        retry: () => setAttempt((value) => value + 1),
+    };
 }
 export function Classes() {
-    const [id, setId] = useState("");
-    const [error, setError] = useState<unknown>();
-    const navigate = useNavigate();
-    const user = identity(getSession())!;
-    if (!canManageAcademic(user.role))
-        return (
-            <Unavailable
-                title="Lớp học"
-                text="API danh sách lớp của học viên và giáo viên chưa sẵn sàng. Trang này chưa thể tra cứu lớp được phân công hoặc lớp đã ghi danh; vui lòng liên hệ giáo vụ."
-            />
-        );
+    const [search, setSearch] = useState("");
+    const [query, setQuery] = useState<ClassQuery>({ page: 1 });
+    const load = useCallback(() => listClasses(query), [query]);
+    const result = useRead(load);
+    const page = result.data;
     return (
         <>
             <PageHeading
                 title="Lớp học"
-                subtitle="Tra cứu theo UUID hoặc tạo lớp mới. API chưa hỗ trợ danh sách toàn bộ lớp."
+                subtitle="Tra cứu lớp trong phạm vi tài khoản của bạn. Trạng thái được cập nhật theo ngày tại Việt Nam."
             />
             <AcademicLinks />
             <section className="panel">
-                <h2>Tra cứu chi tiết lớp</h2>
+                <h2>Danh sách lớp học</h2>
                 <form
+                    className="academic-filters"
                     onSubmit={(event) => {
                         event.preventDefault();
-                        if (!isAcademicId(id.trim())) {
-                            setError(new Error("Nhập UUID hợp lệ, khác rỗng."));
-                            return;
-                        }
-                        navigate(`/classes/${id.trim()}`);
+                        setQuery((previous) => ({ ...previous, search: search.trim(), page: 1 }));
                     }}
                 >
-                    <label htmlFor="lookup-id">Mã định danh lớp (UUID)</label>
-                    <input
-                        id="lookup-id"
-                        value={id}
-                        onChange={(event) => setId(event.target.value)}
-                        required
-                        aria-describedby="lookup-help"
-                    />
-                    <p id="lookup-help" className="small muted">
-                        Dùng ID nhận được khi tạo lớp, không phải mã lớp.
-                    </p>
-                    <ErrorMessage error={error} />
-                    <button className="primary">Tra cứu lớp</button>
+                    <label htmlFor="class-search">Tìm mã hoặc tên lớp
+                        <input id="class-search" type="search" maxLength={200} value={search} onChange={(event) => setSearch(event.target.value)} />
+                    </label>
+                    <label htmlFor="class-status">Trạng thái
+                        <select id="class-status" value={query.status ?? ""} onChange={(event) => setQuery((previous) => ({ ...previous, status: (event.target.value || undefined) as ClassQuery["status"], page: 1 }))}>
+                            <option value="">Tất cả trạng thái</option>
+                            <option value="Upcoming">Sắp khai giảng</option>
+                            <option value="Ongoing">Đang học</option>
+                            <option value="Finished">Đã kết thúc</option>
+                        </select>
+                    </label>
+                    <button className="primary">Tìm lớp</button>
                 </form>
+                {result.loading && <p role="status">Đang tải danh sách lớp…</p>}
+                <ErrorMessage error={result.error} />
+                {result.error ? <button className="secondary" onClick={result.retry}>Thử tải lại lớp</button> : null}
+                {page && <>
+                    <p role="status" className="small muted">{page.total} lớp phù hợp · Trang {page.page} / {Math.max(1, Math.ceil(page.total / page.pageSize))}</p>
+                    {page.items.length === 0 && <p>Không có lớp phù hợp. Thử đổi bộ lọc hoặc quay lại trang trước.</p>}
+                    <ul className="catalog-list class-list">
+                        {page.items.map((item) => <li key={item.id}>
+                            <div><span className="pill">{item.code}</span> <span className="pill">{classStatus(item.status)}</span>
+                                <h3><Link className="accent" to={`/classes/${item.id}`}>{item.name}</Link></h3>
+                                <p>{item.courseName} · {item.teacherName}</p>
+                                <p className="small">{item.startDate} — {item.endDate}</p></div>
+                            <div className="academic-actions">
+                                <Link className="secondary inline" to={`/classes/${item.id}`}>Chi tiết lớp</Link>
+                                <Link className="secondary inline" to={`/schedule?classId=${encodeURIComponent(item.id)}`}>Xem lịch</Link>
+                            </div>
+                        </li>)}
+                    </ul>
+                    <div className="academic-actions" role="group" aria-label="Phân trang lớp học">
+                        <button className="secondary" disabled={page.page <= 1} onClick={() => setQuery((previous) => ({ ...previous, page: page.page - 1 }))}>Trang trước</button>
+                        <button className="secondary" disabled={page.page * page.pageSize >= page.total} onClick={() => setQuery((previous) => ({ ...previous, page: page.page + 1 }))}>Trang sau</button>
+                    </div>
+                </>}
             </section>
         </>
     );
 }
+function classStatus(status: string) {
+    return ({ Upcoming: "Sắp khai giảng", Ongoing: "Đang học", Finished: "Đã kết thúc" } as Record<string, string>)[status] ?? status;
+}
 export function ClassDetails() {
     const { id = "" } = useParams();
-    // The parent keys route content by pathname; the loader remains stable for this mounted ID.
-    const [load] = useState(() => () => getClass(id));
+    const load = useCallback(() => getClass(id), [id]);
     const result = useRead(load);
     const location = useLocation();
     const success =
@@ -213,10 +245,15 @@ export function ClassDetails() {
                             }).format(item.tuitionFee)}
                         </dd>
                         <dt>Trạng thái</dt>
-                        <dd>{item.status}</dd>
+                         <dd>{classStatus(item.status)}</dd>
                         <dt>Ngày tạo</dt>
                         <dd>{item.createdAt}</dd>
                     </dl>
+                    <div className="academic-actions">
+                        <Link className="secondary inline" to={`/schedule?classId=${encodeURIComponent(item.id)}`}>Xem lịch lớp</Link>
+                        <Link className="secondary inline" to={`/progress/${item.id}`}>Tiến độ lớp</Link>
+                        {identity(getSession()) && canManageAcademic(identity(getSession())!.role) && <Link className="primary inline" to={`/schedule?classId=${encodeURIComponent(item.id)}&create=1`}>Tạo buổi học</Link>}
+                    </div>
                 </section>
             )}
         </>

@@ -12,15 +12,17 @@ internal static class AcademicRoles
 {
     // Giáo vụ (Staff) và Admin quản lý lớp; giáo viên/học viên xem lớp của mình ở US-09/US-11.
     public const string Managers = Roles.Staff + "," + Roles.Admin;
+    public const string Readers = Managers + "," + Roles.Teacher + "," + Roles.Student;
 }
 
 [ApiController]
 [Route("api/academic/classes")]
-[Authorize(Roles = AcademicRoles.Managers)]
+[Authorize(Roles = AcademicRoles.Readers)]
 [AcademicErrors]
 public sealed class ClassesController(ClassService classes) : ControllerBase
 {
     [HttpPost]
+    [Authorize(Roles = AcademicRoles.Managers)]
     [ProducesResponseType<ClassResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
@@ -35,7 +37,11 @@ public sealed class ClassesController(ClassService classes) : ControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public Task<ClassResponse> Get(Guid id, CancellationToken ct) => classes.GetAsync(id, ct);
 
+    [HttpGet]
+    public Task<ClassPageResponse> List([FromQuery] ClassListQuery query, CancellationToken ct) => classes.ListAsync(query, ct);
+
     [HttpPost("{id:guid}/replay")]
+    [Authorize(Roles = AcademicRoles.Managers)]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Replay(Guid id, CancellationToken ct)
@@ -45,6 +51,7 @@ public sealed class ClassesController(ClassService classes) : ControllerBase
     }
 
     [HttpPost("republish")]
+    [Authorize(Roles = AcademicRoles.Managers)]
     [ProducesResponseType<RepublishClassesResponse>(StatusCodes.Status200OK)]
     public Task<RepublishClassesResponse> Republish(CancellationToken ct) => classes.RepublishAsync(ct);
 }
@@ -53,6 +60,7 @@ public sealed class ClassesController(ClassService classes) : ControllerBase
 [ApiController]
 [Route("api/academic")]
 [Authorize(Roles = AcademicRoles.Managers)]
+[AcademicErrors]
 public sealed class AcademicLookupController(ClassService classes) : ControllerBase
 {
     [HttpGet("courses")]

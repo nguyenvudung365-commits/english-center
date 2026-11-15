@@ -52,6 +52,9 @@ import {
 import { ErrorMessage, PageHeading, Unavailable } from "./ui";
 import { Assignments, AssignmentDetails, Enrollments } from "./assignment-pages";
 import { AccountCreate, ProfilePanel } from "./identity-pages";
+import { Schedule, SessionDetails } from "./schedule-pages";
+import { AttendancePage } from "./attendance-pages";
+import { ProgressPage, StatisticsPage } from "./statistics-pages";
 import "./styles.css";
 
 const labels = {
@@ -203,9 +206,7 @@ function Overview() {
                     <BookOpen />
                     <h3>Lớp học</h3>
                     <p>
-                        {["Admin", "Staff"].includes(user.role)
-                            ? "Tra cứu chi tiết lớp bằng mã định danh từ hệ thống."
-                            : "Không gian lớp học sẽ có khi API học tập được tích hợp."}
+                        Tra cứu lớp, thông tin giáo viên và lịch học trong phạm vi tài khoản.
                     </p>
                     <span>
                         Xem lớp học <ChevronRight size={16} />
@@ -225,9 +226,9 @@ function Overview() {
                 <div>
                     <h3>Hiển thị đúng dữ liệu, đúng thời điểm</h3>
                     <p>
-                        Đăng nhập và bảo mật đã kết nối API. Lịch, tiến độ,
-                        thống kê và thông báo sẽ mở khi API nghiệp vụ sẵn sàng;
-                        trang này không sử dụng số liệu minh họa.
+                        Lớp học, lịch học, điểm danh và tiến độ sử dụng dữ liệu
+                        nghiệp vụ. Nguồn thống kê hoặc thông báo chưa khả dụng
+                        được ghi rõ, không thay bằng số liệu minh họa.
                     </p>
                 </div>
             </div>
@@ -379,30 +380,31 @@ function navigation(role: import("./api").Role) {
                   },
               ]
             : []),
-        ...(manager || role === "Teacher"
-            ? [{ to: "/attendance", label: "Điểm danh", icon: Check }]
-            : []),
+        { to: "/attendance", label: role === "Student" ? "Điểm danh của tôi" : "Điểm danh", icon: Check },
         { to: "/assignments", label: "Bài tập", icon: BookOpen },
     ];
     return [
         ...commonLinks.slice(0, 2),
         ...operational,
         ...commonLinks.slice(2),
-    ].map((link) => ({
+    ].filter((link) => link.to !== "/statistics" || role === "Student").map((link) => ({
         ...link,
         unavailable:
             ![
                 "/",
                 "/account",
                 "/classes",
+                "/schedule",
+                "/attendance",
+                "/progress",
+                ...(role === "Student" ? ["/statistics"] : []),
                 "/classes/new",
                 "/courses",
                 "/teachers",
                 "/assignments",
                 "/users/new",
                 ...(manager ? ["/enrollment"] : []),
-            ].includes(link.to) ||
-            (link.to === "/classes" && !manager),
+            ].includes(link.to),
     }));
 }
 function App() {
@@ -536,6 +538,8 @@ function App() {
             ? "Tạo lớp học"
             : location.pathname.startsWith("/classes/")
               ? "Chi tiết lớp học"
+              : location.pathname.startsWith("/schedule/")
+                ? "Chi tiết buổi học"
               : (links.find((link) => link.to === location.pathname)?.label ??
                 "Trang");
     return (
@@ -691,12 +695,15 @@ function App() {
                         />
                         <Route
                             path="/classes/:id"
-                            element={
-                                <ManagerOnly>
-                                    <ClassDetails />
-                                </ManagerOnly>
-                            }
+                            element={<ClassDetails />}
                         />
+                        <Route path="/schedule" element={<Schedule />} />
+                        <Route path="/schedule/:id" element={<SessionDetails />} />
+                        <Route path="/attendance" element={<AttendancePage />} />
+                        <Route path="/attendance/:sessionId" element={<AttendancePage />} />
+                        <Route path="/progress" element={<ProgressPage />} />
+                        <Route path="/progress/:classId" element={<ProgressPage />} />
+                        <Route path="/statistics" element={<StatisticsPage />} />
                         <Route
                             path="/courses"
                             element={
@@ -723,21 +730,6 @@ function App() {
                                 text: "Finance chưa có API truy vấn hóa đơn, học phí hoặc thanh toán. Trang này không tạo hóa đơn, thu tiền hay xác nhận đã thanh toán; chưa có số dư hoặc tổng tiền để hiển thị.",
                             },
                             {
-                                path: "/attendance",
-                                title: "Điểm danh",
-                                text: "Academic chưa có API danh sách buổi học và ghi nhận điểm danh. Trang này chưa tải hoặc lưu trạng thái có mặt, vắng mặt; không có bản ghi minh họa.",
-                            },
-                            {
-                                path: "/schedule",
-                                title: "Lịch học",
-                                text: "Lịch học và lịch dạy sẽ hiển thị khi API lịch của Academic được hoàn thiện.",
-                            },
-                            {
-                                path: "/progress",
-                                title: "Tiến độ học tập",
-                                text: "Điểm danh, bài tập và điểm cần dữ liệu thực tế từ Academic. Chưa có số liệu để tổng hợp.",
-                            },
-                            {
                                 path: "/notifications",
                                 title: "Thông báo",
                                 text: "API danh sách và đánh dấu thông báo đã đọc chưa được triển khai. Đây không phải hộp thư trống.",
@@ -746,11 +738,6 @@ function App() {
                                 path: "/feedback",
                                 title: "Phản hồi",
                                 text: "API gửi và xử lý phản hồi chưa sẵn sàng. Vui lòng liên hệ trực tiếp giáo vụ; trang này chưa gửi hay lưu phản hồi.",
-                            },
-                            {
-                                path: "/statistics",
-                                title: "Thống kê",
-                                text: "Chưa có API thống kê nghiệp vụ. Biểu đồ và số liệu sẽ hiển thị khi có dữ liệu được xác minh.",
                             },
                         ].map((page) => (
                             <Route
