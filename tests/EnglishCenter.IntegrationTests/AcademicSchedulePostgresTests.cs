@@ -71,10 +71,16 @@ public sealed class AcademicSchedulePostgresTests : IAsyncLifetime
         using (var scope = fixture.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AcademicDbContext>();
-            var assignment = Assignment.Create(fixture.First, "Preserved assignment", "Synthetic", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1));
-            var submission = Submission.Create(assignment.Id, fixture.Users["student"]);
-            submission.ReplaceFiles([SubmissionFile.Create(submission.Id, Guid.NewGuid(), "synthetic.pdf", "application/pdf", 12)], DateTimeOffset.UtcNow);
-            db.Assignments.Add(assignment); db.Submissions.Add(submission);
+            // Schema cũ chưa có cột chấm điểm: chèn thẳng bằng SQL thay vì model hiện tại.
+            var (a, s, f) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+            await db.Database.ExecuteSqlRawAsync($"""
+                INSERT INTO academic.assignments (id, class_id, title, description, opens_at_utc, closes_at_utc)
+                VALUES ('{a}', '{fixture.First}', 'Preserved assignment', 'Synthetic', now(), now() + interval '1 day');
+                INSERT INTO academic.submissions (id, assignment_id, student_id, revision, submitted_at)
+                VALUES ('{s}', '{a}', '{fixture.Users["student"]}', '{Guid.NewGuid()}', now());
+                INSERT INTO academic.submission_files (id, submission_id, file_id, file_name, content_type, size_bytes)
+                VALUES ('{Guid.NewGuid()}', '{s}', '{f}', 'x.pdf', 'application/pdf', 12);
+                """);
             await db.SaveChangesAsync();
         }
         var tables = new[] { "courses", "teachers", "classes", "class_students", "assignments", "submissions", "submission_files" };
@@ -348,8 +354,16 @@ public sealed class AcademicSchedulePostgresTests : IAsyncLifetime
         }
     }
 
+    // Cột do migration chấm điểm (tuần 5+) thêm vào; chỉ so sánh phần dữ liệu có từ trước nâng cấp.
+    private static string AddedColumns(string table) => table switch
+    {
+        "assignments" => "'created_at','created_by','is_legacy','kind','lesson','obligations_resolved_at','published_at','published_by','published_event_sent_at','session_id','unit','updated_at','version'",
+        "submissions" => "'feedback','grade_version','graded_by','score'",
+        _ => "",
+    };
+
     private Task<string?> TableSnapshotAsync(string table) =>
-        ScalarAsync($"SELECT coalesce(jsonb_agg(row_to_json(t)::jsonb ORDER BY row_to_json(t)::text)::text, '[]') FROM academic.\"{table}\" t");
+        ScalarAsync($"SELECT coalesce(jsonb_agg((row_to_json(t)::jsonb - ARRAY[{AddedColumns(table)}]::text[]) ORDER BY row_to_json(t)::text)::text, '[]') FROM academic.\"{table}\" t");
 
     private async Task<string?> ScalarAsync(string sql)
     {
