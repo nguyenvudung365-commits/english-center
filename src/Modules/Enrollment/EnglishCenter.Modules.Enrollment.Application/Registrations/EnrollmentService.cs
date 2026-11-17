@@ -25,6 +25,7 @@ public interface IEnrollmentStore
     Task<Registration?> FindAsync(Guid id, CancellationToken ct);
     Task<Registration?> FindAsync(Guid classId, Guid studentId, CancellationToken ct);
     Task<IReadOnlyList<Registration>> ListAsync(Guid classId, CancellationToken ct);
+    Task<IReadOnlyList<Guid>> ListActiveStudentIdsAsync(Guid classId, CancellationToken ct);
     Task<Registration> SetActiveAsync(Guid id, bool active, CancellationToken ct);
     Task<int> CountCompletedClassesAsync(Guid studentId, DateOnly today, CancellationToken ct);
 }

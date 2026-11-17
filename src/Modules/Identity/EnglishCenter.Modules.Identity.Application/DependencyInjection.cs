@@ -9,6 +9,7 @@ public static class DependencyInjection
         services.AddScoped<Authentication.IdentityService>();
         services.AddScoped<Authentication.UserSyncService>();
         services.AddScoped<EnglishCenter.Modules.Identity.Contracts.IStudentDirectory, Authentication.StudentDirectory>();
+        services.AddScoped<EnglishCenter.Modules.Identity.Contracts.IStudentDisplayDirectory, Authentication.StudentDisplayDirectory>();
         services.AddScoped<EnglishCenter.Modules.Identity.Contracts.IAccountAccess, Authentication.AccountAccess>();
         return services;
     }

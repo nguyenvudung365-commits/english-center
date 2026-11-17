@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace EnglishCenter.Modules.Academic.Api.Controllers;
 
 [ApiController, Route("api/academic/classes/mine"), Authorize(Roles = Roles.Student)]
+[AcademicErrors]
 public sealed class StudentClassesController(StudentClasses classes) : ControllerBase
 {
     [HttpGet]

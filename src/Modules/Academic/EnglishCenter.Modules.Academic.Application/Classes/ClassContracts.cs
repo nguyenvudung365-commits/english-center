@@ -24,3 +24,14 @@ public sealed record TeacherResponse(Guid Id, string FullName, string Email);
 
 // Số sự kiện đã phát; không xác nhận mọi handler nhận đã lưu thành công.
 public sealed record RepublishClassesResponse(int Published);
+
+public sealed record ClassListQuery
+{
+    public string? Search { get; init; }
+    [DisplayFormat(ConvertEmptyStringToNull = false)]
+    public string? Status { get; init; }
+    public int Page { get; init; } = 1;
+    public int PageSize { get; init; } = 20;
+}
+
+public sealed record ClassPageResponse(IReadOnlyList<ClassResponse> Items, int Page, int PageSize, int Total);

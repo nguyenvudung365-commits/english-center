@@ -92,6 +92,22 @@ export function validateClassDraft(
 }
 export const listCourses = () => api<Course[]>("/academic/courses");
 export const listTeachers = () => api<Teacher[]>("/academic/teachers");
+export type ClassQuery = {
+    search?: string;
+    status?: "Upcoming" | "Ongoing" | "Finished";
+    page?: number;
+    pageSize?: number;
+};
+export type ClassPage = { items: ClassDetail[]; page: number; pageSize: number; total: number };
+export function listClasses(query: ClassQuery = {}): Promise<ClassPage> {
+    const parameters = new URLSearchParams({
+        page: String(query.page ?? 1),
+        pageSize: String(query.pageSize ?? 20),
+    });
+    if (query.search?.trim()) parameters.set("search", query.search.trim());
+    if (query.status !== undefined) parameters.set("status", query.status);
+    return api<ClassPage>(`/academic/classes?${parameters}`);
+}
 export async function getClass(id: string): Promise<ClassDetail> {
     if (!isAcademicId(id))
         throw new ApiError(

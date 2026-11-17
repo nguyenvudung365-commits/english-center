@@ -35,6 +35,7 @@ public interface IIdentityStore
 {
     Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken ct);
     Task<User?> FindUserAsync(Guid id, CancellationToken ct);
+    Task<bool> IsActiveInRoleAsync(Guid id, string? expectedRole, CancellationToken ct);
     Task<RefreshSession?> FindSessionAsync(string hash, CancellationToken ct);
     Task<IReadOnlyList<RefreshSession>> SessionsAsync(Guid userId, CancellationToken ct);
     Task<IReadOnlyList<User>> UsersAsync(string? role, CancellationToken ct);

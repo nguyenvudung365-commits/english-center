@@ -5,9 +5,6 @@ namespace EnglishCenter.Modules.Identity.Application.Authentication;
 
 internal sealed class StudentDirectory(IIdentityStore store) : IStudentDirectory
 {
-    public async Task<bool> IsActiveStudentAsync(Guid userId, CancellationToken ct)
-    {
-        var user = await store.FindUserAsync(userId, ct);
-        return user is { Role: Roles.Student, IsLocked: false };
-    }
+    public Task<bool> IsActiveStudentAsync(Guid userId, CancellationToken ct) =>
+        store.IsActiveInRoleAsync(userId, Roles.Student, ct);
 }
