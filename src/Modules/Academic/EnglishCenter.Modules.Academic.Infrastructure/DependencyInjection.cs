@@ -29,6 +29,9 @@ public static class DependencyInjection
 
         services.AddSingleton<IAcademicModuleInfo, AcademicModuleInfo>();
         services.AddScoped<IAcademicStore, AcademicStore>();
+        services.AddScoped<EnglishCenter.Modules.Academic.Application.Sessions.ISessionStore, SessionStore>();
+        services.AddScoped<EnglishCenter.Modules.Academic.Application.Attendance.IAttendanceStore, AttendanceStore>();
+        services.AddScoped<EnglishCenter.Modules.Academic.Application.Statistics.IStatisticsStore, StatisticsStore>();
         services.AddScoped<EnglishCenter.Modules.Academic.Application.Assignments.IAssignmentStore, AssignmentStore>();
         var maxFiles = configuration.GetValue<int?>("Academic:Submissions:MaxFiles") ?? 5;
         var maxTotalBytes = configuration.GetValue<long?>("Academic:Submissions:MaxTotalBytes") ?? 50L * 1024 * 1024;

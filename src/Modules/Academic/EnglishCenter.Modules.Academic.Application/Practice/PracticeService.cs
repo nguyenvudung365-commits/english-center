@@ -32,7 +32,7 @@ public sealed class PracticeService(IPracticeStore store, IAcademicStore classes
     public async Task<PageResponse<PracticeSummaryResponse>> ListAsync(Guid classId, string? search, int page, int pageSize, CancellationToken ct)
     {
         if (classId == Guid.Empty) throw new AcademicFailure(400, "Class is required.", AssignmentService.Errors("classId", "Chọn lớp."));
-        await access.AuthorizeAsync(classId, ClassAccess.Read, ct);
+        await access.AuthorizeAsync(classId, CourseworkClassAccess.Read, ct);
         var items = (await store.ListAsync(classId, ct))
             .Where(x => !x.IsDeleted && CourseworkAccess.Matches(search, x.Title, x.Content))
             .OrderByDescending(x => x.CreatedAt.UtcTicks).ThenBy(x => x.Id).ToList();
@@ -45,13 +45,13 @@ public sealed class PracticeService(IPracticeStore store, IAcademicStore classes
     public async Task<PracticeResponse> GetAsync(Guid id, CancellationToken ct)
     {
         var item = await FindAsync(id, ct);
-        await access.AuthorizeAsync(item.ClassId, ClassAccess.Read, ct);
+        await access.AuthorizeAsync(item.ClassId, CourseworkClassAccess.Read, ct);
         return await ResponseAsync(item, ct);
     }
 
     public async Task<PracticeResponse> CreateAsync(CreatePracticeRequest request, CancellationToken ct)
     {
-        await access.AuthorizeAsync(request.ClassId, ClassAccess.Manage, ct);
+        await access.AuthorizeAsync(request.ClassId, CourseworkClassAccess.Manage, ct);
         Validate(request.Title, request.Content);
         var item = PracticeExercise.Create(request.ClassId, request.Title, request.Content, access.UserId(), access.Role!, clock.GetUtcNow());
         store.Add(item);
@@ -62,7 +62,7 @@ public sealed class PracticeService(IPracticeStore store, IAcademicStore classes
     public async Task<PracticeResponse> UpdateAsync(Guid id, UpdatePracticeRequest request, CancellationToken ct)
     {
         var item = await FindAsync(id, ct);
-        await access.AuthorizeAsync(item.ClassId, ClassAccess.Manage, ct);
+        await access.AuthorizeAsync(item.ClassId, CourseworkClassAccess.Manage, ct);
         Validate(request.Title, request.Content);
         if (request.ExpectedVersion is null)
             throw new AcademicFailure(400, "expectedVersion is required.", AssignmentService.Errors("expectedVersion", "Gửi version đang xem."));
@@ -79,7 +79,7 @@ public sealed class PracticeService(IPracticeStore store, IAcademicStore classes
     public async Task DeleteAsync(Guid id, int? expectedVersion, CancellationToken ct)
     {
         var item = await store.FindAsync(id, ct) ?? throw new AcademicFailure(404, "Practice exercise not found.");
-        await access.AuthorizeAsync(item.ClassId, ClassAccess.Manage, ct);
+        await access.AuthorizeAsync(item.ClassId, CourseworkClassAccess.Manage, ct);
         if (item.IsDeleted) return;
         if (expectedVersion is { } expected && expected != item.Version)
             throw new AcademicFailure(409, "Practice exercise changed. Reload before deleting.");

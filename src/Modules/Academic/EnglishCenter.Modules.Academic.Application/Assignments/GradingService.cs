@@ -19,7 +19,7 @@ public sealed class GradingService(IAssignmentStore store, IAcademicStore classe
         if (!access.IsTeacher) throw new AcademicFailure(403, "Only the class teacher grades submissions.");
         var submission = await store.FindSubmissionByIdAsync(submissionId, ct) ?? throw new AcademicFailure(404, "Submission not found.");
         var assignment = await store.FindAssignmentAsync(submission.AssignmentId, ct) ?? throw new AcademicFailure(404, "Assignment not found.");
-        await access.AuthorizeAsync(assignment.ClassId, ClassAccess.Teach, ct);
+        await access.AuthorizeAsync(assignment.ClassId, CourseworkClassAccess.Teach, ct);
 
         var errors = new Dictionary<string, string[]>();
         if (request.Score is not { } score || !Submission.IsValidScore(score))
@@ -66,7 +66,7 @@ public sealed class GradingService(IAssignmentStore store, IAcademicStore classe
         var submission = await store.FindSubmissionByIdAsync(submissionId, ct) ?? throw new AcademicFailure(404, "Submission not found.");
         var assignment = await store.FindAssignmentAsync(submission.AssignmentId, ct) ?? throw new AcademicFailure(404, "Assignment not found.");
         if (access.IsStudent && submission.StudentId != userId) throw new AcademicFailure(403, "This is another student's submission.");
-        await access.AuthorizeAsync(assignment.ClassId, access.IsStudent ? ClassAccess.Read : ClassAccess.Manage, ct);
+        await access.AuthorizeAsync(assignment.ClassId, access.IsStudent ? CourseworkClassAccess.Read : CourseworkClassAccess.Manage, ct);
         var names = new Dictionary<Guid, string?>();
         var result = new List<GradeHistoryResponse>();
         foreach (var x in (await store.GradeHistoryAsync(submissionId, ct)).OrderByDescending(x => x.Version))

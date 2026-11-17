@@ -16,6 +16,11 @@ public static class DependencyInjection
     public static IServiceCollection AddAcademicApplication(this IServiceCollection services)
     {
         services.AddScoped<ClassService>();
+        services.AddScoped<ClassAccess>();
+        services.AddScoped<Sessions.SessionService>();
+        services.AddScoped<Attendance.AttendanceService>();
+        services.AddScoped<Statistics.StatisticsService>();
+        services.AddScoped<EnglishCenter.Modules.Academic.Contracts.ISessionDirectory, Sessions.SessionDirectory>();
         services.AddScoped<EnglishCenter.Modules.Academic.Contracts.IClassDirectory, ClassDirectory>();
         services.AddScoped<CourseworkAccess>();
         services.AddScoped<CourseworkEvents>();

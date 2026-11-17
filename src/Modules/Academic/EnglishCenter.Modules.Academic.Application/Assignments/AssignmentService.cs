@@ -22,7 +22,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
 
     public async Task<AssignmentResponse> CreateAsync(CreateAssignmentRequest request, CancellationToken ct)
     {
-        await access.AuthorizeAsync(request.ClassId, ClassAccess.Manage, ct);
+        await access.AuthorizeAsync(request.ClassId, CourseworkClassAccess.Manage, ct);
         var userId = access.UserId();
         if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Trim().Length > Assignment.TitleMaxLength ||
             (request.Description?.Length ?? 0) > Assignment.DescriptionMaxLength ||
@@ -44,7 +44,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
     public async Task<AssignmentResponse> UpdateAsync(Guid id, UpdateAssignmentRequest request, CancellationToken ct)
     {
         var item = await FindAsync(id, ct);
-        await access.AuthorizeAsync(item.ClassId, ClassAccess.Manage, ct);
+        await access.AuthorizeAsync(item.ClassId, CourseworkClassAccess.Manage, ct);
         if (request.ExpectedVersion is null)
             throw new AcademicFailure(400, "expectedVersion is required.", Errors("expectedVersion", "Gửi version đang xem để chống ghi đè."));
         if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Trim().Length > Assignment.TitleMaxLength ||
@@ -71,7 +71,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
     public async Task<AssignmentResponse> PublishAsync(Guid id, PublishAssignmentRequest request, CancellationToken ct)
     {
         var item = await FindAsync(id, ct);
-        await access.AuthorizeAsync(item.ClassId, ClassAccess.Manage, ct);
+        await access.AuthorizeAsync(item.ClassId, CourseworkClassAccess.Manage, ct);
         // Retry sau khi mất response: bài đã hiển thị thì trả trạng thái hiện tại, không tạo snapshot/event mới.
         if (item.IsVisibleToStudents) return Response(item, clock.GetUtcNow());
         if (request.ExpectedVersion is { } expected && expected != item.Version)
@@ -116,7 +116,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
 
     public async Task<IReadOnlyList<AssignmentResponse>> ListAsync(Guid classId, AssignmentQuery query, CancellationToken ct)
     {
-        await access.AuthorizeAsync(classId, ClassAccess.Read, ct);
+        await access.AuthorizeAsync(classId, CourseworkClassAccess.Read, ct);
         var status = ParseStatus(query.Status);
         var kind = ParseKind(query.Kind);
         var now = clock.GetUtcNow();
@@ -131,7 +131,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
     public async Task<AssignmentResponse> GetAsync(Guid id, CancellationToken ct)
     {
         var item = await FindAsync(id, ct);
-        await access.AuthorizeAsync(item.ClassId, ClassAccess.Read, ct);
+        await access.AuthorizeAsync(item.ClassId, CourseworkClassAccess.Read, ct);
         EnsureVisible(item);
         return Response(item, clock.GetUtcNow());
     }
@@ -141,7 +141,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
         var userId = access.UserId();
         if (!access.IsStudent) throw new AcademicFailure(403, "Only students submit assignments.");
         var assignment = await FindAsync(assignmentId, ct);
-        await access.AuthorizeAsync(assignment.ClassId, ClassAccess.Read, ct);
+        await access.AuthorizeAsync(assignment.ClassId, CourseworkClassAccess.Read, ct);
         EnsureVisible(assignment);
         CheckWindow(assignment);
         var ids = request.FileIds;
@@ -176,7 +176,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
         var id = access.UserId();
         if (!access.IsStudent) throw new AcademicFailure(403, "Only students access their own submission.");
         var assignment = await FindAsync(assignmentId, ct);
-        await access.AuthorizeAsync(assignment.ClassId, ClassAccess.Read, ct);
+        await access.AuthorizeAsync(assignment.ClassId, CourseworkClassAccess.Read, ct);
         EnsureVisible(assignment);
         return Response(await store.FindSubmissionAsync(assignmentId, id, ct) ?? throw new AcademicFailure(404, "No submission yet."));
     }
@@ -187,7 +187,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
     public async Task<IReadOnlyList<SubmissionResponse>> ListSubmissionsAsync(Guid assignmentId, bool? graded, CancellationToken ct)
     {
         var assignment = await FindAsync(assignmentId, ct);
-        await access.AuthorizeAsync(assignment.ClassId, ClassAccess.Manage, ct);
+        await access.AuthorizeAsync(assignment.ClassId, CourseworkClassAccess.Manage, ct);
         return (await store.SubmissionsAsync(assignmentId, ct))
             .Where(x => graded is null || (x.GradeVersion > 0) == graded)
             .Select(Response).ToList();
@@ -197,7 +197,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
     public async Task<IReadOnlyList<RecipientResponse>> RecipientsAsync(Guid assignmentId, CancellationToken ct)
     {
         var assignment = await FindAsync(assignmentId, ct);
-        await access.AuthorizeAsync(assignment.ClassId, ClassAccess.Manage, ct);
+        await access.AuthorizeAsync(assignment.ClassId, CourseworkClassAccess.Manage, ct);
         // Đủ mọi bài nộp (không cắt 200) để khớp với snapshot người nhận, vốn không giới hạn.
         var submissions = (await store.AllSubmissionsAsync(assignmentId, ct)).ToDictionary(x => x.StudentId);
         var recipients = await store.RecipientsAsync(assignmentId, ct);
@@ -226,7 +226,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
         List<Guid> classIds;
         if (query.ClassId is { } classId)
         {
-            await access.AuthorizeAsync(classId, ClassAccess.Read, ct);
+            await access.AuthorizeAsync(classId, CourseworkClassAccess.Read, ct);
             classIds = [classId];
         }
         else
@@ -265,7 +265,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
         var item = await store.FindSubmissionByIdAsync(submissionId, ct) ?? throw new AcademicFailure(404, "Submission not found.");
         var assignment = await FindAsync(item.AssignmentId, ct);
         if (access.IsStudent && item.StudentId != id) throw new AcademicFailure(403, "This is another student's submission.");
-        await access.AuthorizeAsync(assignment.ClassId, access.IsStudent ? ClassAccess.Read : ClassAccess.Manage, ct);
+        await access.AuthorizeAsync(assignment.ClassId, access.IsStudent ? CourseworkClassAccess.Read : CourseworkClassAccess.Manage, ct);
         if (item.Files.All(x => x.FileId != fileId)) throw new AcademicFailure(404, "File is not attached to this submission.");
         var download = await media.DownloadAsync(item.StudentId, fileId, ct) ?? throw new AcademicFailure(404, "Confirmed file not found.");
         return new(download.Url, download.ExpiresAt);

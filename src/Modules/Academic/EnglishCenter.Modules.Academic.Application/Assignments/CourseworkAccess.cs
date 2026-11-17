@@ -6,7 +6,7 @@ using EnglishCenter.Modules.Identity.Contracts;
 
 namespace EnglishCenter.Modules.Academic.Application.Assignments;
 
-public enum ClassAccess
+public enum CourseworkClassAccess
 {
     // Staff/Admin, Teacher đúng lớp, Student còn quyền lớp.
     Read,
@@ -39,18 +39,18 @@ public sealed class CourseworkAccess(IAcademicStore classes, IEnrollmentAccess e
         return userId;
     }
 
-    public async Task<Class> AuthorizeAsync(Guid classId, ClassAccess mode, CancellationToken ct)
+    public async Task<Class> AuthorizeAsync(Guid classId, CourseworkClassAccess mode, CancellationToken ct)
     {
         var userId = await EnsureActiveAsync(ct);
         var item = await classes.FindClassAsync(classId, ct) ?? throw new AcademicFailure(404, "Class not found.");
         var teachesClass = IsTeacher && item.TeacherId == userId;
-        if (mode == ClassAccess.Teach)
+        if (mode == CourseworkClassAccess.Teach)
         {
             if (teachesClass) return item;
             throw new AcademicFailure(403, "Only the class teacher can grade this class.");
         }
         if (IsManager || teachesClass) return item;
-        if (mode == ClassAccess.Read && IsStudent && await enrollment.IsActiveAsync(classId, userId, ct)) return item;
+        if (mode == CourseworkClassAccess.Read && IsStudent && await enrollment.IsActiveAsync(classId, userId, ct)) return item;
         throw new AcademicFailure(403, "You do not have access to this class.");
     }
 
