@@ -23,3 +23,6 @@ dist/
 
 ## Tài liệu nhóm lưu trên Google Drive, không lưu trong repository code
 /docs/
+
+# Báo cáo tuần của thành viên, không đưa vào repository
+TV3_WEEK*.md
