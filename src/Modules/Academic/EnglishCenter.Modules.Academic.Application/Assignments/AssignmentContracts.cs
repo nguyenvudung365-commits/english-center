@@ -11,7 +11,8 @@ public sealed record UpdateAssignmentRequest(string Title, string? Description, 
     string? Kind, string? Unit, string? Lesson, Guid? SessionId, int? ExpectedVersion);
 public sealed record PublishAssignmentRequest(int? ExpectedVersion);
 public sealed record SubmitAssignmentRequest(Guid[]? FileIds, Guid? ExpectedRevision);
-public sealed record GradeSubmissionRequest(decimal? Score, string? Feedback, int? ExpectedGradeVersion);
+// ExpectedRevision: revision bài nộp giáo viên đang xem; học viên thay file sau đó → 409, phải xem lại bài mới.
+public sealed record GradeSubmissionRequest(decimal? Score, string? Feedback, int? ExpectedGradeVersion, Guid? ExpectedRevision = null);
 
 public sealed record AssignmentResponse(Guid Id, Guid ClassId, string Title, string Description, DateTimeOffset OpensAtUtc,
     DateTimeOffset ClosesAtUtc, string Kind, string? Unit, string? Lesson, Guid? SessionId, bool IsLegacy, string Status,
@@ -45,6 +46,9 @@ public interface IAssignmentStore
     Task<Submission?> FindSubmissionAsync(Guid assignmentId, Guid studentId, CancellationToken ct);
     Task<Submission?> FindSubmissionByIdAsync(Guid id, CancellationToken ct);
     Task<IReadOnlyList<Submission>> SubmissionsAsync(Guid assignmentId, CancellationToken ct);
+    // Không giới hạn số dòng, không kèm file: dùng khi phải đối chiếu đủ mọi học viên với snapshot nghĩa vụ
+    // (chốt missed, danh sách người nhận, replay). Cắt bớt ở đây sẽ tính nhầm người đã nộp thành bỏ bài.
+    Task<IReadOnlyList<Submission>> AllSubmissionsAsync(Guid assignmentId, CancellationToken ct);
     Task<IReadOnlyList<Submission>> StudentSubmissionsAsync(Guid studentId, IReadOnlyCollection<Guid> assignmentIds, CancellationToken ct);
     Task<IReadOnlyList<SubmissionGrade>> GradeHistoryAsync(Guid submissionId, CancellationToken ct);
     Task<IReadOnlyList<AssignmentRecipient>> RecipientsAsync(Guid assignmentId, CancellationToken ct);

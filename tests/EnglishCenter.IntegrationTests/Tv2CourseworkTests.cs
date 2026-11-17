@@ -14,6 +14,7 @@ using EnglishCenter.Modules.Academic.Domain.Classes;
 using EnglishCenter.Modules.Academic.Domain.Courses;
 using EnglishCenter.Modules.Academic.Domain.Teachers;
 using EnglishCenter.Modules.Academic.Infrastructure.Persistence;
+using EnglishCenter.Modules.Enrollment.Contracts;
 using EnglishCenter.Modules.Enrollment.Domain.Registrations;
 using EnglishCenter.Modules.Enrollment.Infrastructure.Persistence;
 using EnglishCenter.Modules.Finance.Infrastructure.Persistence;
@@ -152,16 +153,27 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
         return (await Json(response)).GetProperty("id").GetGuid();
     }
 
-    private Task<HttpResponseMessage> Grade(Guid submission, decimal? score, int? expected, string? feedback = null) =>
-        client.PutAsJsonAsync($"/api/academic/submissions/{submission}/grade", new { score, feedback, expectedGradeVersion = expected });
+    // Mặc định gửi revision hiện tại (giáo viên đang xem bản mới nhất); test bài bị thay file truyền revision cũ.
+    private async Task<HttpResponseMessage> Grade(Guid submission, decimal? score, int? expected, string? feedback = null,
+        Guid? revision = null) =>
+        await client.PutAsJsonAsync($"/api/academic/submissions/{submission}/grade",
+            new { score, feedback, expectedGradeVersion = expected, expectedRevision = revision ?? await Revision(submission) });
+
+    private async Task<Guid> Revision(Guid submission)
+    {
+        using var scope = factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<AcademicDbContext>().Submissions
+            .Where(x => x.Id == submission).Select(x => x.Revision).SingleAsync();
+    }
 
     private static async Task<JsonElement> Json(HttpResponseMessage response) =>
         JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
 
-    private async Task<ReconcileResult> Reconcile(TimeSpan shift, bool resolve)
+    private async Task<ReconcileResult> Reconcile(TimeSpan shift, bool resolve, IEnrollmentAccess? enrollment = null)
     {
         using var scope = factory.Services.CreateScope();
-        var reconciler = ActivatorUtilities.CreateInstance<CourseworkReconciler>(scope.ServiceProvider, new ShiftedClock(shift));
+        object[] args = enrollment is null ? [new ShiftedClock(shift)] : [new ShiftedClock(shift), enrollment];
+        var reconciler = ActivatorUtilities.CreateInstance<CourseworkReconciler>(scope.ServiceProvider, args);
         return await reconciler.RunOnceAsync(resolve, CancellationToken.None);
     }
 
@@ -180,9 +192,10 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
         Assert.Equal(users["teacher"], graded.GetProperty("gradedBy").GetGuid());
 
         Assert.Equal(HttpStatusCode.Conflict, (await Grade(submission, 9m, 0)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await Grade(submission, 9m, 1, "Sửa sau phúc khảo")).StatusCode);
-        // Retry đúng nội dung (mất response) không tạo lịch sử/event mới.
-        Assert.Equal(HttpStatusCode.OK, (await Grade(submission, 9m, 1, "Sửa sau phúc khảo")).StatusCode);
+        var beforeRegrade = await Revision(submission);
+        Assert.Equal(HttpStatusCode.OK, (await Grade(submission, 9m, 1, "Sửa sau phúc khảo", beforeRegrade)).StatusCode);
+        // Retry đúng nội dung (mất response, client vẫn giữ revision cũ) không tạo lịch sử/event mới.
+        Assert.Equal(HttpStatusCode.OK, (await Grade(submission, 9m, 1, "Sửa sau phúc khảo", beforeRegrade)).StatusCode);
 
         var history = (await client.GetFromJsonAsync<JsonElement[]>($"/api/academic/submissions/{submission}/grades"))!;
         Assert.Equal(2, history.Length);
@@ -214,6 +227,7 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
     [InlineData("10.1")]
     [InlineData("null")]
     [InlineData("no-version")]
+    [InlineData("no-revision")]
     [InlineData("long-feedback")]
     public async Task InvalidGrade_IsRejectedWithoutHistory(string kind)
     {
@@ -225,6 +239,8 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
         {
             "null" => await Grade(submission, null, 0),
             "no-version" => await Grade(submission, 5m, null),
+            "no-revision" => await client.PutAsJsonAsync($"/api/academic/submissions/{submission}/grade",
+                new { score = 5m, expectedGradeVersion = 0 }),
             "long-feedback" => await Grade(submission, 5m, 0, new string('x', 2001)),
             _ => await Grade(submission, decimal.Parse(kind, System.Globalization.CultureInfo.InvariantCulture), 0)
         };
@@ -494,6 +510,130 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Grading_IsRejected_WhenTheStudentReplacedFilesAfterTheTeacherOpenedTheSubmission()
+    {
+        await Enroll();
+        var assignment = (await CreateAssignment("Thay file khi đang chấm")).GetProperty("id").GetGuid();
+        var submission = await Submit(assignment);
+        await As("teacher");
+        var opened = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>($"/api/academic/assignments/{assignment}/submissions"))!);
+        var seen = opened.GetProperty("revision").GetGuid();
+
+        // Học viên thay file trong lúc giáo viên đang xem bản cũ (gradeVersion vẫn là 0).
+        var replacement = await File();
+        await As("student");
+        var replaced = await client.PutAsJsonAsync($"/api/academic/assignments/{assignment}/submissions",
+            new { fileIds = new[] { replacement }, expectedRevision = seen });
+        Assert.Equal(HttpStatusCode.OK, replaced.StatusCode);
+        var current = (await Json(replaced)).GetProperty("revision").GetGuid();
+        Assert.NotEqual(seen, current);
+
+        await As("teacher");
+        var stale = await Grade(submission, 9m, 0, "Chấm theo bản cũ", seen);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Contains("replaced the files", (await Json(stale)).GetProperty("title").GetString());
+        Assert.Empty((await client.GetFromJsonAsync<JsonElement[]>($"/api/academic/submissions/{submission}/grades"))!);
+        Assert.DoesNotContain(factory.Graded, x => x.SubmissionId == submission);
+
+        // Giáo viên tải lại, thấy file mới rồi mới chấm được.
+        var reloaded = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>($"/api/academic/assignments/{assignment}/submissions"))!);
+        Assert.Equal((current, 0, replacement), (reloaded.GetProperty("revision").GetGuid(), reloaded.GetProperty("gradeVersion").GetInt32(),
+            Assert.Single(reloaded.GetProperty("files").EnumerateArray()).GetProperty("fileId").GetGuid()));
+        var graded = await Grade(submission, 9m, 0, "Đã xem bản mới", current);
+        Assert.Equal(HttpStatusCode.OK, graded.StatusCode);
+        Assert.Equal(1, (await Json(graded)).GetProperty("gradeVersion").GetInt32());
+    }
+
+    [Fact]
+    public async Task HandlerFailure_KeepsEventsPending_UntilTheConsumerRecoversAndTheWorkerRedelivers()
+    {
+        await Enroll(); await Enroll("other-student");
+        factory.FailHandlers = true;
+        // Dữ liệu nguồn đã commit nên request vẫn thành công; chỉ event là chưa được đánh dấu đã gửi.
+        var assignment = (await CreateAssignment("Consumer lỗi")).GetProperty("id").GetGuid();
+        var submission = await Submit(assignment);
+        await As("teacher");
+        Assert.Equal(HttpStatusCode.OK, (await Grade(submission, 7m, 0)).StatusCode);
+        await AssertSent(published: false, graded: false, missed: null);
+
+        // Quá hạn, consumer vẫn lỗi: chốt Missed nhưng cả 3 event đều chờ retry.
+        var failing = await Reconcile(TimeSpan.FromHours(3), resolve: true);
+        Assert.Equal((0, 0, 1, 0, 3), (failing.PublishedRetried, failing.GradesRetried, failing.Missed, failing.MissedSent, failing.DeliveryFailed));
+        await AssertSent(published: false, graded: false, missed: false);
+        Assert.DoesNotContain(factory.Published, x => x.AssignmentId == assignment);
+        Assert.DoesNotContain(factory.Graded, x => x.SubmissionId == submission);
+        Assert.Empty(factory.Missed);
+
+        // Consumer phục hồi: worker phát lại đúng một lần với cùng khóa nghiệp vụ rồi mới đánh dấu đã gửi.
+        factory.FailHandlers = false;
+        var recovered = await Reconcile(TimeSpan.FromHours(3), resolve: true);
+        Assert.Equal((1, 1, 1, 0), (recovered.PublishedRetried, recovered.GradesRetried, recovered.MissedSent, recovered.DeliveryFailed));
+        await AssertSent(published: true, graded: true, missed: true);
+        Assert.Equal(CourseworkEvents.Key("assignment-published", assignment), Assert.Single(factory.Published, x => x.AssignmentId == assignment).EventId);
+        Assert.Equal(CourseworkEvents.Key("submission-graded", submission, 1), Assert.Single(factory.Graded, x => x.SubmissionId == submission).EventId);
+        Assert.Equal(CourseworkEvents.Key("assignment-missed", assignment, users["other-student"]), Assert.Single(factory.Missed).EventId);
+        var again = await Reconcile(TimeSpan.FromHours(4), resolve: true);
+        Assert.Equal((0, 0, 0, 0), (again.PublishedRetried, again.GradesRetried, again.MissedSent, again.DeliveryFailed));
+
+        // Handler TV3 đã chạy ở cả lần lỗi lẫn lần phát lại; dedupe theo khóa nên chỉ tính một vi phạm.
+        using var check = factory.Services.CreateScope();
+        Assert.Equal(1, (await check.ServiceProvider.GetRequiredService<EnrollmentDbContext>().Enrollments
+            .SingleAsync(x => x.StudentId == users["other-student"] && x.ClassId == classId)).SkippedAssignmentCount);
+
+        async Task AssertSent(bool published, bool graded, bool? missed)
+        {
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AcademicDbContext>();
+            Assert.Equal(published, (await db.Assignments.AsNoTracking().SingleAsync(x => x.Id == assignment)).PublishedEventSentAt is not null);
+            Assert.Equal(graded, (await db.SubmissionGrades.AsNoTracking().SingleAsync(x => x.SubmissionId == submission)).EventSentAt is not null);
+            if (missed is { } expected)
+                Assert.Equal(expected, (await db.AssignmentRecipients.AsNoTracking()
+                    .SingleAsync(x => x.AssignmentId == assignment && x.StudentId == users["other-student"])).MissedEventSentAt is not null);
+        }
+    }
+
+    [Fact]
+    public async Task MissedReconciliation_ChecksEverySubmission_So201OnTimeSubmittersAreNeverMissed()
+    {
+        const int count = 201;
+        var assignment = (await CreateAssignment("Lớp đông")).GetProperty("id").GetGuid();
+        using (var scope = factory.Services.CreateScope())
+        {
+            // Snapshot 201 người nhận, ai cũng nộp đúng hạn.
+            var db = scope.ServiceProvider.GetRequiredService<AcademicDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            for (var i = 0; i < count; i++)
+            {
+                var student = Guid.NewGuid();
+                db.AssignmentRecipients.Add(AssignmentRecipient.Create(assignment, student, now));
+                var work = Submission.Create(assignment, student);
+                work.ReplaceFiles([SubmissionFile.Create(work.Id, Guid.NewGuid(), $"bai-{i}.pdf", "application/pdf", 1024)], now);
+                db.Submissions.Add(work);
+            }
+            await db.SaveChangesAsync();
+        }
+
+        // Ai cũng còn quyền lớp: nếu worker bỏ sót bài nộp của ai, người đó sẽ bị chốt Missed chứ không được miễn.
+        var result = await Reconcile(TimeSpan.FromHours(3), resolve: true, new AlwaysActive());
+        Assert.Equal((1, 0, 0, 0), (result.AssignmentsResolved, result.Missed, result.Exempted, result.MissedSent));
+        Assert.Empty(factory.Missed);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var outcomes = await scope.ServiceProvider.GetRequiredService<AcademicDbContext>().AssignmentRecipients.AsNoTracking()
+                .Where(x => x.AssignmentId == assignment).Select(x => x.Outcome).ToListAsync();
+            Assert.Equal(count, outcomes.Count);
+            Assert.All(outcomes, x => Assert.Equal(ObligationOutcome.Submitted, x));
+        }
+
+        // Màn hình người nhận của giáo viên cũng đối chiếu đủ 201 bài nộp.
+        await As("teacher");
+        var recipients = (await client.GetFromJsonAsync<JsonElement[]>($"/api/academic/assignments/{assignment}/recipients"))!;
+        Assert.Equal(count, recipients.Length);
+        Assert.All(recipients, x => Assert.Equal(("Submitted", "Submitted"),
+            (x.GetProperty("outcome").GetString(), x.GetProperty("submissionStatus").GetString())));
+    }
+
+    [Fact]
     public async Task Practice_TeacherAndStaffManage_StudentsWithClassAccessRead()
     {
         var membership = await Enroll();
@@ -552,6 +692,12 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
         public override DateTimeOffset GetUtcNow() => System.GetUtcNow() + shift;
     }
 
+    // Mọi học viên còn quyền lớp: người không có bài nộp sẽ bị chốt Missed (không được miễn).
+    private sealed class AlwaysActive : IEnrollmentAccess
+    {
+        public Task<bool> IsActiveAsync(Guid classId, Guid studentId, CancellationToken ct) => Task.FromResult(true);
+    }
+
     private sealed class CourseworkFactory : WebApplicationFactory<Program>,
         IIntegrationEventHandler<AssignmentPublishedIntegrationEvent>, IIntegrationEventHandler<SubmissionGradedIntegrationEvent>,
         IIntegrationEventHandler<AssignmentMissedIntegrationEvent>
@@ -560,9 +706,12 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
         public ConcurrentQueue<AssignmentPublishedIntegrationEvent> Published { get; } = new();
         public ConcurrentQueue<SubmissionGradedIntegrationEvent> Graded { get; } = new();
         public ConcurrentQueue<AssignmentMissedIntegrationEvent> Missed { get; } = new();
-        public Task HandleAsync(AssignmentPublishedIntegrationEvent value, CancellationToken ct = default) { Published.Enqueue(value); return Task.CompletedTask; }
-        public Task HandleAsync(SubmissionGradedIntegrationEvent value, CancellationToken ct = default) { Graded.Enqueue(value); return Task.CompletedTask; }
-        public Task HandleAsync(AssignmentMissedIntegrationEvent value, CancellationToken ct = default) { Missed.Enqueue(value); return Task.CompletedTask; }
+        // Bật để giả lập consumer đang lỗi: handler ném lỗi và không ghi nhận event.
+        public volatile bool FailHandlers;
+        public Task HandleAsync(AssignmentPublishedIntegrationEvent value, CancellationToken ct = default) { Fail(); Published.Enqueue(value); return Task.CompletedTask; }
+        public Task HandleAsync(SubmissionGradedIntegrationEvent value, CancellationToken ct = default) { Fail(); Graded.Enqueue(value); return Task.CompletedTask; }
+        public Task HandleAsync(AssignmentMissedIntegrationEvent value, CancellationToken ct = default) { Fail(); Missed.Enqueue(value); return Task.CompletedTask; }
+        private void Fail() { if (FailHandlers) throw new InvalidOperationException("Consumer is down (simulated)."); }
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");

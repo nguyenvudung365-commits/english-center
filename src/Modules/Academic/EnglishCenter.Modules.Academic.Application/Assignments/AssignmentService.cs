@@ -1,4 +1,5 @@
 using EnglishCenter.Modules.Academic.Application.Abstractions;
+using EnglishCenter.Modules.Academic.Contracts.IntegrationEvents;
 using EnglishCenter.Modules.Academic.Domain.Assignments;
 using EnglishCenter.Modules.MediaNotification.Contracts;
 using Microsoft.Extensions.Logging;
@@ -100,7 +101,10 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
 
     private async Task AnnounceAsync(Assignment item, int recipients, CancellationToken ct)
     {
-        await events.PublishAssignmentAsync(item, recipients, ct);
+        // Bài đã commit. Handler lỗi → giữ PublishedEventSentAt = null để worker phát lại; request vẫn thành công.
+        if (!await CourseworkEvents.DeliveredAsync(events.PublishAssignmentAsync(item, recipients, ct), log,
+                nameof(AssignmentPublishedIntegrationEvent), item.Id))
+            return;
         item.MarkPublishedEventSent(clock.GetUtcNow());
         try { await store.SaveAsync(ct); }
         // Dữ liệu nguồn đã commit; worker sẽ phát lại cùng EventId nếu chưa đánh dấu được.
@@ -194,7 +198,8 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
     {
         var assignment = await FindAsync(assignmentId, ct);
         await access.AuthorizeAsync(assignment.ClassId, ClassAccess.Manage, ct);
-        var submissions = (await store.SubmissionsAsync(assignmentId, ct)).ToDictionary(x => x.StudentId);
+        // Đủ mọi bài nộp (không cắt 200) để khớp với snapshot người nhận, vốn không giới hạn.
+        var submissions = (await store.AllSubmissionsAsync(assignmentId, ct)).ToDictionary(x => x.StudentId);
         var recipients = await store.RecipientsAsync(assignmentId, ct);
         var result = recipients.Select(x =>
         {
@@ -277,22 +282,32 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
         var item = await FindAsync(assignmentId, ct);
         int published = 0, graded = 0, missed = 0;
         var recipients = await store.RecipientsAsync(item.Id, ct);
-        if (item.IsPublished)
+        try
         {
-            await events.PublishAssignmentAsync(item, recipients.Count, ct);
-            published = 1;
+            if (item.IsPublished)
+            {
+                await events.PublishAssignmentAsync(item, recipients.Count, ct);
+                published = 1;
+            }
+            foreach (var submission in (await store.AllSubmissionsAsync(item.Id, ct)).Where(x => x.GradeVersion > 0))
+            {
+                var latest = (await store.GradeHistoryAsync(submission.Id, ct)).MaxBy(x => x.Version);
+                if (latest is null) continue;
+                await events.PublishGradeAsync(submission, item.ClassId, latest, ct);
+                graded++;
+            }
+            foreach (var recipient in recipients.Where(x => x.Outcome == ObligationOutcome.Missed))
+            {
+                await events.PublishMissedAsync(item, recipient, ct);
+                missed++;
+            }
         }
-        foreach (var submission in (await store.SubmissionsAsync(item.Id, ct)).Where(x => x.GradeVersion > 0))
+        catch (AggregateException ex)
         {
-            var latest = (await store.GradeHistoryAsync(submission.Id, ct)).MaxBy(x => x.Version);
-            if (latest is null) continue;
-            await events.PublishGradeAsync(submission, item.ClassId, latest, ct);
-            graded++;
-        }
-        foreach (var recipient in recipients.Where(x => x.Outcome == ObligationOutcome.Missed))
-        {
-            await events.PublishMissedAsync(item, recipient, ct);
-            missed++;
+            // Không báo "đã phát lại" khi consumer còn lỗi. Phát lại cùng khóa nên chạy lại replay là an toàn.
+            log.LogWarning(ex, "Coursework replay by {ActorId} for assignment {AssignmentId} stopped: a handler failed after published={Published}, graded={Graded}, missed={Missed}",
+                actor, item.Id, published, graded, missed);
+            throw new AcademicFailure(503, "A consumer failed while replaying coursework events. Fix the consumer and replay again.");
         }
         log.LogInformation("Coursework events replayed by {ActorId} ({Role}) for assignment {AssignmentId}: published={Published}, graded={Graded}, missed={Missed}",
             actor, access.Role, item.Id, published, graded, missed);

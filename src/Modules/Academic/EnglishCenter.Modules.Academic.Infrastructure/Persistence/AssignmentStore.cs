@@ -24,6 +24,8 @@ internal sealed class AssignmentStore(AcademicDbContext db) : IAssignmentStore
         db.Submissions.Include(x => x.Files).SingleOrDefaultAsync(x => x.Id == id, ct);
     public async Task<IReadOnlyList<Submission>> SubmissionsAsync(Guid assignmentId, CancellationToken ct) =>
         await db.Submissions.AsNoTracking().Include(x => x.Files).Where(x => x.AssignmentId == assignmentId).OrderBy(x => x.Id).Take(ClassLimit).ToListAsync(ct);
+    public async Task<IReadOnlyList<Submission>> AllSubmissionsAsync(Guid assignmentId, CancellationToken ct) =>
+        await db.Submissions.AsNoTracking().Where(x => x.AssignmentId == assignmentId).OrderBy(x => x.Id).ToListAsync(ct);
     public async Task<IReadOnlyList<Submission>> StudentSubmissionsAsync(Guid studentId, IReadOnlyCollection<Guid> assignmentIds, CancellationToken ct) =>
         assignmentIds.Count == 0 ? [] : await db.Submissions.AsNoTracking().Include(x => x.Files)
             .Where(x => x.StudentId == studentId && assignmentIds.Contains(x.AssignmentId)).ToListAsync(ct);

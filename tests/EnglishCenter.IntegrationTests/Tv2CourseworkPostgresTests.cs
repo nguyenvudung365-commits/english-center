@@ -64,7 +64,7 @@ public sealed class Tv2CourseworkPostgresTests : IAsyncLifetime
         Assert.Empty(await db.Database.GetPendingMigrationsAsync());
         Assert.False(db.Database.HasPendingModelChanges());
         var submission = await db.Submissions.SingleAsync(x => x.Id == submissionId);
-        db.SubmissionGrades.Add(submission.Grade(7.5m, "Ổn", teacherId, 0, DateTimeOffset.UtcNow));
+        db.SubmissionGrades.Add(submission.Grade(7.5m, "Ổn", teacherId, 0, submission.Revision, DateTimeOffset.UtcNow));
         await db.SaveChangesAsync();
         await using var check = Context();
         var stored = await check.Submissions.SingleAsync(x => x.Id == submissionId);
@@ -79,8 +79,8 @@ public sealed class Tv2CourseworkPostgresTests : IAsyncLifetime
         await using var second = Context();
         var a = await first.Submissions.SingleAsync(x => x.Id == submissionId);
         var b = await second.Submissions.SingleAsync(x => x.Id == submissionId);
-        first.SubmissionGrades.Add(a.Grade(6m, null, teacherId, 0, DateTimeOffset.UtcNow));
-        second.SubmissionGrades.Add(b.Grade(9m, null, teacherId, 0, DateTimeOffset.UtcNow));
+        first.SubmissionGrades.Add(a.Grade(6m, null, teacherId, 0, a.Revision, DateTimeOffset.UtcNow));
+        second.SubmissionGrades.Add(b.Grade(9m, null, teacherId, 0, b.Revision, DateTimeOffset.UtcNow));
         var results = await Task.WhenAll(Save(first), Save(second));
         Assert.Equal(1, results.Count(x => x));
         await using var check = Context();

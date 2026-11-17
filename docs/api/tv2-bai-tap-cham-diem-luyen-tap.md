@@ -47,7 +47,7 @@ Không có quyền lớp → 403 (giữ hành vi các endpoint bài tập đã c
 | `GET /api/academic/assignments/{id}/submissions?graded=` | Teacher lớp, Staff, Admin | Mảng bài nộp (giữ dạng cũ) + `score, feedback, gradeVersion, gradedAt, gradedBy` |
 | `PUT /api/academic/assignments/{id}/submissions` | Student | Nộp 1–5 file (giữ nguyên quy tắc file/revision cũ). Bài đã chấm không thay file (409) |
 | `GET /api/academic/assignments/{id}/submissions/mine` | Student | Bài nộp của mình, có điểm khi đã chấm |
-| `POST /api/academic/assignments/{id}/events/replay` | Staff, Admin | Phát lại event đã lưu với cùng khóa (đối soát consumer). Trả `{ published, graded, missed }`; có log audit người thao tác |
+| `POST /api/academic/assignments/{id}/events/replay` | Staff, Admin | Phát lại event đã lưu với cùng khóa (đối soát consumer). Trả `{ published, graded, missed }`; có log audit người thao tác. Consumer còn lỗi → **503**, sửa consumer rồi gọi lại (an toàn vì cùng khóa) |
 
 **Buổi học (Session, TV1):** chưa có module Session trên develop nên server hiện **từ chối `sessionId` (409)** thay vì lưu tham chiếu chưa kiểm chứng, và cho công bố không cần buổi.
 Khi TV1 đăng ký bản triển khai `ISessionCatalog` thật (`IsAvailable = true`), server tự động: kiểm tra buổi cùng lớp, lấy Unit/Lesson mặc định từ buổi, và **bắt buộc gán buổi trước khi công bố** (AC-05). Lúc đó frontend nên gửi `publish: false` khi tạo rồi công bố sau khi chọn buổi.
@@ -57,13 +57,15 @@ Khi TV1 đăng ký bản triển khai `ISessionCatalog` thật (`IsAvailable = t
 `PUT /api/academic/submissions/{submissionId}/grade` — **chỉ Teacher đúng lớp**.
 
 ```json
-{ "score": 8.5, "feedback": "Bài tốt, cần thêm ví dụ", "expectedGradeVersion": 0 }
+{ "score": 8.5, "feedback": "Bài tốt, cần thêm ví dụ", "expectedGradeVersion": 0, "expectedRevision": "9a3e…" }
 ```
 
 - `score`: 0–10, bước 0,1 (8.55 → 400). Chưa chấm thì `score = null`, không phải 0.
 - `expectedGradeVersion`: `gradeVersion` đang hiển thị (0 nếu chưa chấm). Lệch → **409**, frontend tải lại rồi cho sửa tiếp.
-- Gửi lại đúng nội dung vừa lưu (mất response) → 200, không tạo thêm lịch sử/event.
-- Trả `SubmissionResponse` mới (`gradeVersion` tăng 1).
+- `expectedRevision` (**bắt buộc**, thiếu → 400): `revision` của bài nộp giáo viên đang xem (lấy từ danh sách bài nộp hoặc response chấm lần trước). Nếu học viên đã thay file sau khi giáo viên mở bài → **409** “The student replaced the files…”; frontend tải lại bài nộp, cho giáo viên xem file mới rồi chấm lại. Mỗi lần chấm cũng đổi `revision`, nên khi sửa điểm phải gửi `revision` mới nhất.
+- Gửi lại đúng nội dung vừa lưu (mất response) → 200, không tạo thêm lịch sử/event (kể cả khi vẫn gửi `expectedRevision` cũ).
+- Trả `SubmissionResponse` mới (`gradeVersion` tăng 1, `revision` mới).
+- Nếu consumer của `SubmissionGraded` lỗi, điểm vẫn được lưu và trả 200; event giữ trạng thái chưa gửi để worker phát lại (mục 7).
 
 `GET /api/academic/submissions/{submissionId}/grades` — lịch sử mới nhất trước (Teacher lớp, Staff, Admin, chính học viên):
 
@@ -112,6 +114,7 @@ Nội dung văn bản thuần theo lớp; chưa có quiz/chấm tự động/n�
 ## 6. Event và hợp đồng cho module khác
 
 Event phát **sau khi commit**; EventId cố định theo khóa nghiệp vụ nên retry/replay giữ nguyên khóa. Consumer vẫn phải dedupe theo khóa nghiệp vụ.
+Academic phát ở chế độ strict (`throwOnHandlerFailure: true`): chỉ khi **mọi** handler xử lý thành công thì event mới được đánh dấu đã gửi. Một handler lỗi → event giữ trạng thái chờ và được phát lại cho **tất cả** handler, nên handler đã chạy thành công ở lần trước sẽ nhận lại cùng khóa (bắt buộc dedupe).
 Các trường mới là `init` thêm vào record cũ — payload cũ vẫn deserialize được.
 
 | Event | Khóa chống trùng | Trường |
@@ -127,8 +130,8 @@ Truy vấn (Academic.Contracts):
 ## 7. Worker chốt nghĩa vụ và phát lại (Q-07)
 
 `CourseworkWorker` chạy mỗi `Academic:Coursework:IntervalSeconds` giây (mặc định 60):
-1. Luôn phát lại `AssignmentPublished`/`SubmissionGraded` đã commit nhưng chưa đánh dấu gửi (crash giữa commit và publish), sau 30 giây chờ request tự phát.
-2. Chỉ khi `Academic:Coursework:ResolveMissed=true` (**mặc định tắt**): với bài đã công bố và quá hạn, chốt từng học viên trong snapshot: có bài nộp trước hạn → `Submitted`; mất quyền lớp → `Exempted`; còn lại → `Missed` và phát `AssignmentMissed`. Trạng thái cuối không mở lại; chạy lại không phát thêm.
+1. Luôn phát lại `AssignmentPublished`/`SubmissionGraded` đã commit nhưng chưa đánh dấu gửi (crash giữa commit và publish, hoặc handler lỗi), sau 30 giây chờ request tự phát. Event nào có handler lỗi thì không đánh dấu đã gửi và được thử lại ở vòng sau; các event khác trong cùng vòng vẫn được xử lý. Kết quả mỗi vòng có `DeliveryFailed` (số event có handler lỗi).
+2. Chỉ khi `Academic:Coursework:ResolveMissed=true` (**mặc định tắt**): với bài đã công bố và quá hạn, chốt từng học viên trong snapshot: có bài nộp trước hạn → `Submitted`; mất quyền lớp → `Exempted`; còn lại → `Missed` và phát `AssignmentMissed`. Trạng thái cuối không mở lại; chạy lại không phát thêm. Worker đối chiếu **toàn bộ** bài nộp của bài tập (không giới hạn 200 dòng), nên lớp đông bao nhiêu người cũng không bị tính nhầm là bỏ bài.
 
 Tắt toàn bộ worker: `Academic:Coursework:WorkerEnabled=false`. Theo kế hoạch, chỉ bật `ResolveMissed` sau khi đối soát dữ liệu staging.
 
@@ -136,4 +139,5 @@ Tắt toàn bộ worker: `Academic:Coursework:WorkerEnabled=false`. Theo kế ho
 
 - Enrollment chưa lưu lịch sử thời điểm thu hồi quyền: học viên bị thu hồi trong khoảng giữa hạn nộp và lúc worker chạy cũng được miễn (thiên về không phạt sai). Cần TV3 bổ sung contract lịch sử nếu muốn chính xác tuyệt đối.
 - Roster lúc công bố lấy từ read model `academic.class_students` (đồng bộ từ `StudentEnrolled`) rồi lọc bằng `IEnrollmentAccess` hiện tại. Nếu event ghi danh bị mất, dùng replay ghi danh của TV3 trước khi công bố.
+- `GET /api/academic/assignments/{id}/submissions` (danh sách để chấm) vẫn trả tối đa 200 bài nộp và chưa phân trang. Worker chốt nghĩa vụ, `GET …/recipients` và replay thì đối chiếu đủ mọi bài nộp.
 - Event bus vẫn in-memory: không bảo đảm exactly-once; dữ liệu nguồn để dựng lại event (published_at, submission_grades, assignment_recipients) đã lưu bền.

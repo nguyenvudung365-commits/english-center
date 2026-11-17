@@ -1,4 +1,5 @@
 using EnglishCenter.Modules.Academic.Application.Abstractions;
+using EnglishCenter.Modules.Academic.Contracts.IntegrationEvents;
 using EnglishCenter.Modules.Academic.Domain.Assignments;
 using Microsoft.Extensions.Logging;
 
@@ -7,6 +8,7 @@ namespace EnglishCenter.Modules.Academic.Application.Assignments;
 /// <summary>
 /// US-21: chấm và sửa điểm 0–10 (bước 0,1) kèm nhận xét. Chỉ Teacher đúng lớp được ghi; mỗi lần ghi tạo một dòng lịch sử
 /// (điểm trước/sau, nhận xét, người, thời gian, version) trong cùng transaction với điểm hiện tại.
+/// Điểm chỉ được ghi khi khớp cả gradeVersion lẫn revision bài nộp giáo viên đã mở, để không gán điểm cho file chưa xem.
 /// </summary>
 public sealed class GradingService(IAssignmentStore store, IAcademicStore classes, CourseworkAccess access, TimeProvider clock,
     CourseworkEvents events, ILogger<GradingService> log)
@@ -26,23 +28,35 @@ public sealed class GradingService(IAssignmentStore store, IAcademicStore classe
             errors["feedback"] = [$"Nhận xét tối đa {Submission.FeedbackMaxLength} ký tự."];
         if (request.ExpectedGradeVersion is null or < 0)
             errors["expectedGradeVersion"] = ["Gửi gradeVersion đang xem (0 nếu chưa chấm)."];
+        if (request.ExpectedRevision is null || request.ExpectedRevision == Guid.Empty)
+            errors["expectedRevision"] = ["Gửi revision của bài nộp đang xem."];
         if (errors.Count > 0) throw new AcademicFailure(400, "Invalid grade.", errors);
 
         var value = request.Score!.Value;
         var expected = request.ExpectedGradeVersion!.Value;
         // Retry đúng nội dung sau khi mất response: trả kết quả đã lưu, không thêm lịch sử/event.
+        // An toàn khi đặt trước kiểm tra revision: bài đã chấm thì học viên không thay file được nữa.
         if (submission.IsSameGrade(value, request.Feedback, userId, expected)) return AssignmentService.Response(submission);
 
         SubmissionGrade grade;
-        try { grade = submission.Grade(value, request.Feedback, userId, expected, clock.GetUtcNow()); }
+        try { grade = submission.Grade(value, request.Feedback, userId, expected, request.ExpectedRevision!.Value, clock.GetUtcNow()); }
+        catch (SubmissionChangedException)
+        {
+            throw new AcademicFailure(409, "The student replaced the files after you opened this submission. Review the new files before grading.");
+        }
         catch (GradeConflictException) { throw new AcademicFailure(409, "The grade changed. Reload before grading again."); }
         store.Add(grade);
+        // Revision là concurrency token: nếu học viên thay file giữa lúc đọc và lúc lưu thì SaveAsync trả 409.
         await store.SaveAsync(ct);
 
-        await events.PublishGradeAsync(submission, assignment.ClassId, grade, ct);
-        grade.MarkEventSent(clock.GetUtcNow());
-        try { await store.SaveAsync(ct); }
-        catch (AcademicFailure ex) { log.LogWarning(ex, "Could not mark SubmissionGraded {SubmissionId} v{Version} as sent", submission.Id, grade.Version); }
+        // Điểm đã commit. Handler lỗi → giữ EventSentAt = null để worker phát lại; request vẫn thành công.
+        if (await CourseworkEvents.DeliveredAsync(events.PublishGradeAsync(submission, assignment.ClassId, grade, ct), log,
+                nameof(SubmissionGradedIntegrationEvent), submission.Id))
+        {
+            grade.MarkEventSent(clock.GetUtcNow());
+            try { await store.SaveAsync(ct); }
+            catch (AcademicFailure ex) { log.LogWarning(ex, "Could not mark SubmissionGraded {SubmissionId} v{Version} as sent", submission.Id, grade.Version); }
+        }
         return AssignmentService.Response(submission);
     }
 

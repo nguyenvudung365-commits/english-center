@@ -43,10 +43,10 @@ public sealed class Tv2CourseworkDomainTests
     {
         var item = SubmittedWork(); var teacher = Guid.NewGuid();
         var revision = item.Revision;
-        var first = item.Grade(8.5m, "  Tốt  ", teacher, 0, Now);
+        var first = item.Grade(8.5m, "  Tốt  ", teacher, 0, item.Revision, Now);
         Assert.Equal((1, 8.5m, (decimal?)null, "Tốt"), (first.Version, first.Score, first.PreviousScore, first.Feedback));
         Assert.NotEqual(revision, item.Revision);
-        var second = item.Grade(9m, null, teacher, 1, Now.AddMinutes(5));
+        var second = item.Grade(9m, null, teacher, 1, item.Revision, Now.AddMinutes(5));
         Assert.Equal((2, 9m, (decimal?)8.5m, (string?)null), (second.Version, second.Score, second.PreviousScore, second.Feedback));
         Assert.Equal((9m, 2, teacher), (item.Score!.Value, item.GradeVersion, item.GradedBy!.Value));
         Assert.Null(first.EventSentAt);
@@ -56,19 +56,33 @@ public sealed class Tv2CourseworkDomainTests
     public void Grade_WithStaleVersion_IsConflictAndDoesNotChangeScore()
     {
         var item = SubmittedWork(); var teacher = Guid.NewGuid();
-        item.Grade(6m, null, teacher, 0, Now);
-        var conflict = Assert.Throws<GradeConflictException>(() => item.Grade(7m, null, teacher, 0, Now));
+        item.Grade(6m, null, teacher, 0, item.Revision, Now);
+        var conflict = Assert.Throws<GradeConflictException>(() => item.Grade(7m, null, teacher, 0, item.Revision, Now));
         Assert.Equal(1, conflict.CurrentVersion);
         Assert.Equal(6m, item.Score);
+    }
+
+    [Fact]
+    public void Grade_AfterStudentReplacedFiles_IsConflictAndLeavesSubmissionUngraded()
+    {
+        var item = SubmittedWork(); var teacher = Guid.NewGuid();
+        var opened = item.Revision;
+        // Học viên thay file sau khi giáo viên mở bài.
+        item.ReplaceFiles([SubmissionFile.Create(item.Id, Guid.NewGuid(), "ban-moi.pdf", "application/pdf", 200)], Now.AddMinutes(1));
+        var conflict = Assert.Throws<SubmissionChangedException>(() => item.Grade(8m, null, teacher, 0, opened, Now.AddMinutes(2)));
+        Assert.Equal(item.Revision, conflict.CurrentRevision);
+        Assert.Equal((0, (decimal?)null, (DateTimeOffset?)null), (item.GradeVersion, item.Score, item.GradedAt));
+        // Xem lại đúng revision mới thì chấm được.
+        Assert.Equal(1, item.Grade(8m, null, teacher, 0, item.Revision, Now.AddMinutes(3)).Version);
     }
 
     [Fact]
     public void Grade_RejectsInvalidScoreFeedbackAndGrader()
     {
         var item = SubmittedWork();
-        Assert.Throws<ArgumentOutOfRangeException>(() => item.Grade(10.5m, null, Guid.NewGuid(), 0, Now));
-        Assert.Throws<ArgumentException>(() => item.Grade(5m, new string('x', Submission.FeedbackMaxLength + 1), Guid.NewGuid(), 0, Now));
-        Assert.Throws<ArgumentException>(() => item.Grade(5m, null, Guid.Empty, 0, Now));
+        Assert.Throws<ArgumentOutOfRangeException>(() => item.Grade(10.5m, null, Guid.NewGuid(), 0, item.Revision, Now));
+        Assert.Throws<ArgumentException>(() => item.Grade(5m, new string('x', Submission.FeedbackMaxLength + 1), Guid.NewGuid(), 0, item.Revision, Now));
+        Assert.Throws<ArgumentException>(() => item.Grade(5m, null, Guid.Empty, 0, item.Revision, Now));
         Assert.Equal(0, item.GradeVersion);
     }
 
@@ -76,7 +90,7 @@ public sealed class Tv2CourseworkDomainTests
     public void SameGradeRetry_IsRecognisedOnlyForTheVersionJustWritten()
     {
         var item = SubmittedWork(); var teacher = Guid.NewGuid();
-        item.Grade(8m, "Ổn", teacher, 0, Now);
+        item.Grade(8m, "Ổn", teacher, 0, item.Revision, Now);
         Assert.True(item.IsSameGrade(8m, " Ổn ", teacher, 0));
         Assert.False(item.IsSameGrade(8m, "Khác", teacher, 0));
         Assert.False(item.IsSameGrade(8m, "Ổn", Guid.NewGuid(), 0));
@@ -87,7 +101,7 @@ public sealed class Tv2CourseworkDomainTests
     public void GradedSubmission_CannotReplaceFiles()
     {
         var item = SubmittedWork();
-        item.Grade(5m, null, Guid.NewGuid(), 0, Now);
+        item.Grade(5m, null, Guid.NewGuid(), 0, item.Revision, Now);
         Assert.Throws<InvalidOperationException>(() =>
             item.ReplaceFiles([SubmissionFile.Create(item.Id, Guid.NewGuid(), "moi.pdf", "application/pdf", 10)], Now));
     }

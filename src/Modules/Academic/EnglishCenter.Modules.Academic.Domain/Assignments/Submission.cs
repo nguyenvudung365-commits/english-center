@@ -45,14 +45,18 @@ public sealed class Submission
 
     /// <summary>
     /// Chấm lần đầu hoặc sửa điểm. <paramref name="expectedGradeVersion"/> là version người chấm đã thấy (0 nếu chưa chấm);
-    /// lệch version nghĩa là có người khác vừa chấm nên phải tải lại. Trả về dòng lịch sử mới để lưu cùng transaction.
+    /// lệch version nghĩa là có người khác vừa chấm nên phải tải lại. <paramref name="expectedRevision"/> là revision bài nộp
+    /// người chấm đã mở; lệch nghĩa là học viên đã thay file sau đó nên phải xem lại bài mới.
+    /// Trả về dòng lịch sử mới để lưu cùng transaction.
     /// </summary>
-    public SubmissionGrade Grade(decimal score, string? feedback, Guid gradedBy, int expectedGradeVersion, DateTimeOffset now)
+    public SubmissionGrade Grade(decimal score, string? feedback, Guid gradedBy, int expectedGradeVersion, Guid expectedRevision,
+        DateTimeOffset now)
     {
         if (!IsValidScore(score)) throw new ArgumentOutOfRangeException(nameof(score), "Score must be 0–10 in steps of 0.1.");
         var cleaned = string.IsNullOrWhiteSpace(feedback) ? null : feedback.Trim();
         if (cleaned?.Length > FeedbackMaxLength) throw new ArgumentException("Feedback is too long.", nameof(feedback));
         if (gradedBy == Guid.Empty) throw new ArgumentException("Grader is required.", nameof(gradedBy));
+        if (expectedRevision != Revision) throw new SubmissionChangedException(Revision);
         if (expectedGradeVersion != GradeVersion) throw new GradeConflictException(GradeVersion);
         var previous = Score;
         GradeVersion++;
@@ -72,6 +76,13 @@ public sealed class GradeConflictException(int currentVersion)
     : InvalidOperationException("The grade changed. Reload before grading again.")
 {
     public int CurrentVersion { get; } = currentVersion;
+}
+
+// Học viên đã thay file sau khi giáo viên mở bài: điểm không được gán cho nội dung giáo viên chưa xem.
+public sealed class SubmissionChangedException(Guid currentRevision)
+    : InvalidOperationException("The submission changed after it was opened. Review the new files before grading.")
+{
+    public Guid CurrentRevision { get; } = currentRevision;
 }
 
 // US-21: dấu vết từng lần chấm/sửa điểm (người, thời gian, điểm trước/sau, nhận xét, version).
