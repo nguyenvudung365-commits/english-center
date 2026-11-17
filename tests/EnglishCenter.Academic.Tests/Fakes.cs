@@ -4,6 +4,11 @@ using EnglishCenter.Modules.Academic.Application.Abstractions;
 using EnglishCenter.Modules.Academic.Domain.Classes;
 using EnglishCenter.Modules.Academic.Domain.Courses;
 using EnglishCenter.Modules.Academic.Domain.Teachers;
+using EnglishCenter.BuildingBlocks.Security;
+using EnglishCenter.Modules.Academic.Application.Classes;
+using EnglishCenter.Modules.Academic.Contracts;
+using EnglishCenter.Modules.Enrollment.Contracts;
+using EnglishCenter.Modules.Identity.Contracts;
 
 namespace EnglishCenter.Academic.Tests;
 
@@ -76,4 +81,45 @@ internal sealed class RecordingEventBus : IEventBus
 internal sealed class FixedClock(DateTimeOffset now) : TimeProvider
 {
     public override DateTimeOffset GetUtcNow() => now;
+}
+
+internal sealed class FakeClassPolicy : ICurrentUser, IAccountAccess, IEnrollmentAccess, IClassDirectory
+{
+    private readonly FakeAcademicStore store;
+    public FakeClassPolicy(FakeAcademicStore store)
+    {
+        this.store = store;
+        Accounts[UserId!.Value] = Roles.Admin;
+    }
+
+    public bool IsAuthenticated { get; set; } = true;
+    public Guid? UserId { get; set; } = Guid.NewGuid();
+    public string? Role { get; set; } = Roles.Admin;
+    public Dictionary<Guid, string> Accounts { get; } = [];
+    public HashSet<(Guid ClassId, Guid StudentId)> Enrollments { get; } = [];
+    public List<(Guid UserId, string? Role)> AccountChecks { get; } = [];
+    public bool IsInRole(string role) => Role == role;
+    public ClassAccess Access => new(this, this, this, this, store);
+    public void As(string role, Guid? id = null)
+    {
+        UserId = id ?? Guid.NewGuid(); Role = role;
+        Accounts[UserId.Value] = role;
+    }
+    public Task<bool> IsActiveInRoleAsync(Guid userId, string? expectedRole, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        AccountChecks.Add((userId, expectedRole));
+        return Task.FromResult(Accounts.TryGetValue(userId, out var role) && role == expectedRole);
+    }
+    public Task<bool> IsActiveAsync(Guid classId, Guid studentId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(Enrollments.Contains((classId, studentId)));
+    }
+    public Task<ClassIdentity?> FindClassAsync(Guid classId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var item = store.Classes.SingleOrDefault(x => x.Id == classId);
+        return Task.FromResult(item is null ? null : new ClassIdentity(item.Id, item.TeacherId));
+    }
 }

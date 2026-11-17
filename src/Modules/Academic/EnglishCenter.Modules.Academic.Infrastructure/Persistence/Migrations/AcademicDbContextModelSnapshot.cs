@@ -37,15 +37,58 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("closes_at_utc");
 
+                    b.Property<DateTimeOffset?>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasMaxLength(5000)
                         .HasColumnType("character varying(5000)")
                         .HasColumnName("description");
 
+                    b.Property<bool>("IsLegacy")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_legacy");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Lesson")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("lesson");
+
+                    b.Property<DateTimeOffset?>("ObligationsResolvedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("obligations_resolved_at");
+
                     b.Property<DateTimeOffset>("OpensAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("opens_at_utc");
+
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("published_at");
+
+                    b.Property<Guid?>("PublishedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("published_by");
+
+                    b.Property<DateTimeOffset?>("PublishedEventSentAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("published_event_sent_at");
+
+                    b.Property<Guid?>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -53,13 +96,69 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("title");
 
+                    b.Property<string>("Unit")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("unit");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ClassId");
 
+                    b.HasIndex("SessionId");
+
                     b.ToTable("assignments", "academic", t =>
                         {
+                            t.HasCheckConstraint("ck_assignments_kind", "kind IN ('InClass', 'Homework')");
+
                             t.HasCheckConstraint("ck_assignments_window", "closes_at_utc > opens_at_utc");
+                        });
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.AssignmentRecipient", b =>
+                {
+                    b.Property<Guid>("AssignmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("assignment_id");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("student_id");
+
+                    b.Property<DateTimeOffset>("AssignedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("assigned_at");
+
+                    b.Property<DateTimeOffset?>("MissedEventSentAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("missed_event_sent_at");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("outcome");
+
+                    b.Property<DateTimeOffset?>("ResolvedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("resolved_at");
+
+                    b.HasKey("AssignmentId", "StudentId");
+
+                    b.HasIndex("StudentId");
+
+                    b.ToTable("assignment_recipients", "academic", t =>
+                        {
+                            t.HasCheckConstraint("ck_assignment_recipients_outcome", "outcome IN ('Pending', 'Submitted', 'Missed', 'Exempted')");
                         });
                 });
 
@@ -73,14 +172,32 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("assignment_id");
 
+                    b.Property<string>("Feedback")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("feedback");
+
+                    b.Property<int>("GradeVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("grade_version");
+
                     b.Property<DateTimeOffset?>("GradedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("graded_at");
+
+                    b.Property<Guid?>("GradedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("graded_by");
 
                     b.Property<Guid>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("uuid")
                         .HasColumnName("revision");
+
+                    b.Property<decimal?>("Score")
+                        .HasPrecision(3, 1)
+                        .HasColumnType("numeric(3,1)")
+                        .HasColumnName("score");
 
                     b.Property<Guid>("StudentId")
                         .HasColumnType("uuid")
@@ -95,7 +212,12 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                     b.HasIndex("AssignmentId", "StudentId")
                         .IsUnique();
 
-                    b.ToTable("submissions", "academic");
+                    b.ToTable("submissions", "academic", t =>
+                        {
+                            t.HasCheckConstraint("ck_submissions_grade_version", "grade_version >= 0");
+
+                            t.HasCheckConstraint("ck_submissions_score", "score IS NULL OR (CAST(score AS REAL) >= 0 AND CAST(score AS REAL) <= 10)");
+                        });
                 });
 
             modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.SubmissionFile", b =>
@@ -136,6 +258,235 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                     b.ToTable("submission_files", "academic", t =>
                         {
                             t.HasCheckConstraint("ck_submission_files_size", "size_bytes > 0 AND size_bytes <= 20971520");
+                        });
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.SubmissionGrade", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("EventSentAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("event_sent_at");
+
+                    b.Property<string>("Feedback")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("feedback");
+
+                    b.Property<DateTimeOffset>("GradedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("graded_at");
+
+                    b.Property<Guid>("GradedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("graded_by");
+
+                    b.Property<decimal?>("PreviousScore")
+                        .HasPrecision(3, 1)
+                        .HasColumnType("numeric(3,1)")
+                        .HasColumnName("previous_score");
+
+                    b.Property<decimal>("Score")
+                        .HasPrecision(3, 1)
+                        .HasColumnType("numeric(3,1)")
+                        .HasColumnName("score");
+
+                    b.Property<Guid>("SubmissionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("submission_id");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventSentAt");
+
+                    b.HasIndex("SubmissionId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("submission_grades", "academic", t =>
+                        {
+                            t.HasCheckConstraint("ck_submission_grades_score", "CAST(score AS REAL) >= 0 AND CAST(score AS REAL) <= 10");
+
+                            t.HasCheckConstraint("ck_submission_grades_version", "version >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Attendance.Attendance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("class_id");
+
+                    b.Property<DateTime>("RecordedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at_utc");
+
+                    b.Property<Guid>("RecordedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("recorded_by");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("revision");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("student_id");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("SessionId", "StudentId")
+                        .IsUnique();
+
+                    b.HasIndex("StudentId", "ClassId");
+
+                    b.ToTable("attendance", "academic", t =>
+                        {
+                            t.HasCheckConstraint("ck_attendance_revision", "revision >= 1");
+
+                            t.HasCheckConstraint("ck_attendance_status", "status IN ('Present', 'AbsentUnexcused', 'AbsentExcused', 'Late', 'LateOver20Min', 'LeftEarly')");
+                        });
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Attendance.AttendanceReplayAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AttendanceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("attendance_id");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at_utc");
+
+                    b.Property<string>("DispatchStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("dispatch_status");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<DateTime>("RequestedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at_utc");
+
+                    b.Property<Guid>("RequestedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("requested_by");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer")
+                        .HasColumnName("revision");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AttendanceId", "RequestedAtUtc");
+
+                    b.HasIndex("AttendanceId", "Revision");
+
+                    b.ToTable("attendance_replay_attempts", "academic", t =>
+                        {
+                            t.HasCheckConstraint("ck_attendance_replay_completion", "(dispatch_status = 'Pending' AND completed_at_utc IS NULL) OR (dispatch_status <> 'Pending' AND completed_at_utc IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_attendance_replay_reason", "length(trim(reason)) BETWEEN 1 AND 500");
+
+                            t.HasCheckConstraint("ck_attendance_replay_status", "dispatch_status IN ('Pending', 'Dispatched', 'Failed')");
+                        });
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Attendance.AttendanceRevision", b =>
+                {
+                    b.Property<Guid>("AttendanceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("attendance_id");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer")
+                        .HasColumnName("revision");
+
+                    b.Property<DateTime>("ChangedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("changed_at_utc");
+
+                    b.Property<Guid>("ChangedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("changed_by");
+
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("class_id");
+
+                    b.Property<string>("PreviousStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("previous_status");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("student_id");
+
+                    b.HasKey("AttendanceId", "Revision");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("SessionId");
+
+                    b.ToTable("attendance_revisions", "academic", t =>
+                        {
+                            t.HasCheckConstraint("ck_attendance_revisions_previous", "previous_status IS NULL OR previous_status IN ('Present', 'AbsentUnexcused', 'AbsentExcused', 'Late', 'LateOver20Min', 'LeftEarly')");
+
+                            t.HasCheckConstraint("ck_attendance_revisions_revision", "revision >= 1");
+
+                            t.HasCheckConstraint("ck_attendance_revisions_status", "status IN ('Present', 'AbsentUnexcused', 'AbsentExcused', 'Late', 'LateOver20Min', 'LeftEarly')");
                         });
                 });
 
@@ -289,6 +640,141 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Practice.PracticeExercise", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("class_id");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasMaxLength(20000)
+                        .HasColumnType("character varying(20000)")
+                        .HasColumnName("content");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("CreatedByRole")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("created_by_role");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<Guid?>("DeletedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("title");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.ToTable("practice_exercises", "academic");
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Sessions.Session", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("class_id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<DateTime>("EndsAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("ends_at_utc");
+
+                    b.Property<string>("ExamSlot")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("exam_slot");
+
+                    b.Property<string>("Lesson")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("lesson");
+
+                    b.Property<string>("SessionType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("session_type");
+
+                    b.Property<int>("Skills")
+                        .HasColumnType("integer")
+                        .HasColumnName("skills");
+
+                    b.Property<DateTime>("StartsAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("starts_at_utc");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("unit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StartsAtUtc");
+
+                    b.HasIndex("ClassId", "StartsAtUtc");
+
+                    b.ToTable("sessions", "academic", t =>
+                        {
+                            t.HasCheckConstraint("ck_sessions_exam_slot", "exam_slot IS NULL OR (session_type <> 'Regular' AND length(trim(exam_slot)) BETWEEN 1 AND 100)");
+
+                            t.HasCheckConstraint("ck_sessions_lesson", "length(trim(lesson)) BETWEEN 1 AND 200");
+
+                            t.HasCheckConstraint("ck_sessions_skills", "skills >= 1 AND skills <= 15");
+
+                            t.HasCheckConstraint("ck_sessions_time", "ends_at_utc > starts_at_utc");
+
+                            t.HasCheckConstraint("ck_sessions_type", "session_type IN ('Regular', 'MockTest', 'FinalTest')");
+
+                            t.HasCheckConstraint("ck_sessions_unit", "length(trim(unit)) BETWEEN 1 AND 100");
+                        });
+                });
+
             modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Teachers.Teacher", b =>
                 {
                     b.Property<Guid>("Id")
@@ -328,6 +814,15 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.AssignmentRecipient", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Assignments.Assignment", null)
+                        .WithMany()
+                        .HasForeignKey("AssignmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.Submission", b =>
                 {
                     b.HasOne("EnglishCenter.Modules.Academic.Domain.Assignments.Assignment", null)
@@ -346,6 +841,60 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.SubmissionGrade", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Assignments.Submission", null)
+                        .WithMany()
+                        .HasForeignKey("SubmissionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Attendance.Attendance", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Classes.Class", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Sessions.Session", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Attendance.AttendanceReplayAttempt", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Attendance.AttendanceRevision", null)
+                        .WithMany()
+                        .HasForeignKey("AttendanceId", "Revision")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Attendance.AttendanceRevision", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Attendance.Attendance", null)
+                        .WithMany()
+                        .HasForeignKey("AttendanceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Classes.Class", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Sessions.Session", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Classes.Class", b =>
                 {
                     b.HasOne("EnglishCenter.Modules.Academic.Domain.Courses.Course", null)
@@ -361,11 +910,6 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.Submission", b =>
-                {
-                    b.Navigation("Files");
-                });
-
             modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Classes.ClassStudent", b =>
                 {
                     b.HasOne("EnglishCenter.Modules.Academic.Domain.Classes.Class", null)
@@ -373,6 +917,29 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ClassId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Practice.PracticeExercise", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Classes.Class", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Sessions.Session", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Classes.Class", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.Submission", b =>
+                {
+                    b.Navigation("Files");
                 });
 #pragma warning restore 612, 618
         }

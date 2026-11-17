@@ -24,7 +24,8 @@ public class ClassServiceTests
         _store.Teachers.Add(Teacher.Create(TeacherId, "Nguyen Van Giao", "teacher@example.test"));
     }
 
-    private ClassService Service(DateTimeOffset? now = null) => new(_store, _events, new FixedClock(now ?? Now));
+    private ClassService Service(DateTimeOffset? now = null) => new(_store, _events, new FixedClock(now ?? Now),
+        new FakeClassPolicy(_store).Access);
 
     private static CreateClassRequest Valid(string code = "IE-2611-A") => new(code, "IELTS Foundation K1", CourseId, "Main",
         new DateOnly(2026, 11, 2), new DateOnly(2027, 1, 30), 20, 4_500_000m, TeacherId);

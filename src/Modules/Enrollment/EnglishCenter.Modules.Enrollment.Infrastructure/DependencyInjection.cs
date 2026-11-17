@@ -5,6 +5,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using EnglishCenter.Modules.Enrollment.Application.Registrations;
+using EnglishCenter.Modules.Enrollment.Application.Monitoring;
+using EnglishCenter.Modules.Enrollment.Application.PlacementTests;
 
 namespace EnglishCenter.Modules.Enrollment.Infrastructure;
 
@@ -29,6 +31,8 @@ public static class DependencyInjection
 
         services.AddSingleton<IEnrollmentModuleInfo, EnrollmentModuleInfo>();
         services.AddScoped<IEnrollmentStore, EnrollmentStore>();
+        services.AddScoped<IMonitoringStore, MonitoringStore>();
+        services.AddScoped<IPlacementTestStore, PlacementTestStore>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddHostedService<EnrollmentStartup>();
 

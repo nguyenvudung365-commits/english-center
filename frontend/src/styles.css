@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600;700&display=swap");
 :root {
     font-family: "Fira Sans", system-ui, sans-serif;
     color: #0f172a;
@@ -1007,6 +1006,124 @@ footer {
     border-bottom: 1px solid #e2e8f0;
 }
 .assignment-description { white-space: pre-wrap; }
+.academic-filters {
+    display: flex;
+    align-items: end;
+    flex-wrap: wrap;
+    gap: 16px;
+    max-width: none;
+    margin-bottom: 24px;
+}
+.academic-filters label {
+    flex: 1 1 200px;
+    margin: 0;
+}
+.class-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+}
+.class-list h3 { margin: 12px 0 6px; }
+.class-list p { margin-bottom: 8px; }
+.class-list .academic-actions { flex-shrink: 0; }
+.class-list a.accent:hover, .academic-detail a:hover { text-decoration: underline; }
+.schedule-panel, .schedule-agenda, .session-create {
+    margin-bottom: 24px;
+    min-width: 0;
+}
+.session-create[hidden] { display: none; }
+.schedule-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+.schedule-toolbar .eyebrow { margin-bottom: 8px; }
+.schedule-toolbar h2 { margin: 0; }
+.schedule-toolbar .academic-actions { margin: 0; }
+.schedule-modes { display: flex; gap: 8px; }
+.schedule-modes [aria-pressed="true"] {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+}
+.schedule-filter { flex: 1 1 240px; max-width: 400px; margin: 0; }
+.calendar {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    border-top: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+    margin-top: 20px;
+}
+.calendar-day {
+    min-width: 0;
+    padding: 10px 6px;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    min-height: 150px;
+}
+.calendar-day.spillover { background: #f1f5f9; }
+.calendar-day.is-today { box-shadow: inset 0 3px 0 var(--accent); }
+.calendar-day h3 {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin: 0 0 12px;
+    font-size: 1rem;
+}
+.calendar-weekday { color: #475569; font-weight: 400; font-size: 0.8rem; }
+.calendar-events { list-style: none; margin: 0; padding: 0; }
+.calendar-events li + li { margin-top: 8px; }
+.session-link {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px;
+    min-height: 44px;
+    background: #eaf4fa;
+    color: #075985;
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    overflow-wrap: anywhere;
+    font-size: 0.82rem;
+}
+.session-link:hover { background: #dcecf6; text-decoration: underline; }
+.session-link time { font-weight: 600; }
+.session-calendar-type { font-size: 0.75rem; }
+.agenda-day { border-top: 1px solid var(--border); padding-top: 20px; margin-top: 24px; }
+.agenda-day h3 { font-size: 1rem; }
+.agenda-list { list-style: none; padding: 0; margin: 0; }
+.agenda-list li { margin-bottom: 20px; overflow-wrap: anywhere; }
+.agenda-list p { margin: 8px 0; }
+.agenda-list .session-link { flex-direction: row; flex-wrap: wrap; gap: 8px; padding: 12px; }
+.session-skills { border: 1px solid #94a3b8; border-radius: 8px; padding: 16px; margin: 24px 0; min-width: 0; }
+.session-skills legend { padding: 0 8px; font-size: 0.9rem; font-weight: 500; }
+.session-skills > div { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.session-skills label { display: flex; align-items: center; gap: 10px; margin: 0; min-height: 44px; cursor: pointer; }
+.session-skills input { width: 20px; height: 20px; min-height: 20px; margin: 0; padding: 0; accent-color: var(--accent); }
+.conflict-help { margin: 20px 0; }
+@media (max-width: 1100px) {
+    .class-list li { align-items: start; flex-direction: column; gap: 8px; }
+    .calendar-week { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .calendar-month .session-calendar-type { display: none; }
+}
+@media (max-width: 760px) {
+    .schedule-panel { padding: 18px 10px; }
+    .schedule-modes, .schedule-filter { max-width: none; width: 100%; }
+    .schedule-modes button { flex: 1; }
+    .calendar-week { grid-template-columns: minmax(0, 1fr); }
+    .calendar-week .calendar-day { min-height: 90px; padding: 12px; }
+    .calendar-week .session-link { flex-direction: row; flex-wrap: wrap; gap: 8px; }
+    .calendar-month .calendar-day { padding: 8px 0; min-height: 110px; }
+    .calendar-month .calendar-day h3 { flex-direction: column; font-size: 0.9rem; }
+    .calendar-month .session-link { padding: 7px 1px; border-left-width: 2px; font-size: 0.75rem; align-items: center; }
+    .calendar-month .session-calendar-name { display: none; }
+    .academic-filters button { width: 100%; }
+}
 .academic-form textarea {
     width: 100%;
     min-height: 120px;
@@ -1015,4 +1132,49 @@ footer {
     border-radius: 8px;
     padding: 12px;
     font: inherit;
+}
+
+.attendance-panel { margin-bottom: 24px; min-width: 0; }
+.attendance-panel > label { display: block; max-width: 520px; }
+.academic-table-scroll { max-width: 100%; overflow-x: auto; margin: 20px 0; border: 1px solid var(--border); border-radius: 8px; }
+.academic-table-scroll:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.academic-data-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; text-align: left; }
+.academic-data-table caption { padding: 14px 16px; text-align: left; font-weight: 500; color: var(--primary); background: #f1f5f9; }
+.academic-data-table th, .academic-data-table td { padding: 16px; border-bottom: 1px solid var(--border); vertical-align: top; min-width: 130px; max-width: 360px; overflow-wrap: anywhere; }
+.academic-data-table thead th { background: #f8fafc; color: var(--primary); }
+.academic-data-table tbody th { font-weight: 500; }
+.academic-data-table tbody tr:last-child > * { border-bottom: 0; }
+.academic-data-table p { margin-top: 0; }
+.academic-data-table .accent:hover { text-decoration: underline; }
+.attendance-row-form { min-width: 240px; max-width: 360px; }
+.attendance-row-form label { display: block; margin-bottom: 8px; }
+.attendance-row-form select { width: 100%; }
+.attendance-row-form button { margin-top: 12px; min-height: 44px; }
+.data-pagination { align-items: center; margin-top: 20px; }
+.data-pagination span { margin-right: auto; }
+.academic-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; margin: 24px 0; }
+.academic-metrics > div { border-left: 3px solid var(--border); padding-left: 16px; }
+.academic-metrics dt { color: #475569; line-height: 1.5; }
+.academic-metrics dd { margin: 8px 0 0; color: var(--primary); font-size: 1.6rem; font-weight: 600; }
+.academic-metrics dd span { font-size: 1rem; font-weight: 400; }
+.academic-metrics dd.metric-comparison { font-size: 1.1rem; line-height: 1.5; }
+.replay-audit, .statistics-contributor { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border); }
+.statistics-contributor h3 { font-size: 1.1rem; }
+.statistics-chart { margin: 24px 0; }
+.statistics-chart svg { display: block; width: 100%; height: auto; min-height: 180px; }
+.statistics-chart text { fill: #334155; font: 14px "Fira Sans", system-ui, sans-serif; }
+.statistics-chart figcaption { color: #475569; font-size: 0.9rem; margin-top: 12px; }
+.chart-axis { stroke: #64748b; stroke-width: 1; }
+.chart-series { fill: none; stroke: #075985; stroke-width: 3; stroke-linejoin: round; }
+.chart-point { fill: #075985; stroke: #fff; stroke-width: 2; }
+.attendance-panel progress { width: 100%; height: 22px; accent-color: #075985; }
+@media (max-width: 760px) {
+    .attendance-panel { padding: 20px 16px; }
+    .academic-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 12px; }
+    .academic-metrics > div { padding-left: 10px; }
+    .academic-metrics dd { font-size: 1.3rem; }
+    .data-pagination { gap: 12px; }
+    .data-pagination span { flex-basis: 100%; }
+    .statistics-chart { overflow-x: auto; }
+    .statistics-chart svg { min-width: 640px; }
 }

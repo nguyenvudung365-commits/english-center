@@ -1,5 +1,6 @@
 using EnglishCenter.Modules.Finance.Application.Abstractions;
 using EnglishCenter.Modules.Finance.Infrastructure.Persistence;
+using EnglishCenter.Modules.Finance.Application.Invoices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,6 +29,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IFinanceModuleInfo, FinanceModuleInfo>();
         services.AddScoped<IInvoiceStore, InvoiceStore>();
+        services.AddScoped<IInvoiceManagementStore, InvoiceStore>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddHostedService<FinanceStartup>();
         return services;

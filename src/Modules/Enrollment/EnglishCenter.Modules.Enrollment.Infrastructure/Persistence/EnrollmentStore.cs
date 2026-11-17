@@ -50,6 +50,10 @@ internal sealed class EnrollmentStore(EnrollmentDbContext db) : IEnrollmentStore
     public async Task<IReadOnlyList<Registration>> ListAsync(Guid classId, CancellationToken ct) =>
         await db.Enrollments.AsNoTracking().Where(x => x.ClassId == classId).OrderBy(x => x.Id).Take(200).ToListAsync(ct);
 
+    public async Task<IReadOnlyList<Guid>> ListActiveStudentIdsAsync(Guid classId, CancellationToken ct) =>
+        await db.Enrollments.AsNoTracking().Where(x => x.ClassId == classId && x.Status == "Active" && x.IsActive)
+            .Select(x => x.StudentId).Distinct().OrderBy(x => x).ToListAsync(ct);
+
     public async Task<Registration> SetActiveAsync(Guid id, bool active, CancellationToken ct)
     {
         var changed = await db.Enrollments.Where(x => x.Id == id && (!active || x.Status == "Active"))
@@ -61,6 +65,12 @@ internal sealed class EnrollmentStore(EnrollmentDbContext db) : IEnrollmentStore
         }
         return (await FindAsync(id, ct))!;
     }
+
+    public Task<int> CountCompletedClassesAsync(Guid studentId, DateOnly today, CancellationToken ct) =>
+        (from enrollment in db.Enrollments
+         join snapshot in db.Classes on enrollment.ClassId equals snapshot.ClassId
+         where enrollment.StudentId == studentId && enrollment.Status == "Active" && snapshot.EndDate < today
+         select enrollment.Id).CountAsync(ct);
 
     public async Task<Registration> EnrollAsync(EnrollRequest request, DateTime now, DateOnly today, CancellationToken ct)
     {

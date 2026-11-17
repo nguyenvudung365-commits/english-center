@@ -328,3 +328,58 @@ describe("Academic API contract through the real session client", () => {
         expect(getSession()).toBeNull();
     });
 });
+
+// Schedule slice: append-only list contract; existing create/detail cases stay unchanged.
+import { listClasses } from "./academic";
+
+describe("Academic class paging contract", () => {
+    const fetcher = vi.fn<typeof fetch>();
+    beforeEach(() => {
+        vi.stubGlobal("fetch", fetcher);
+        fetcher.mockReset();
+        setSession(session());
+    });
+    afterEach(() => {
+        setSession(null);
+        vi.unstubAllGlobals();
+    });
+
+    it("uses default paging and preserves the server page envelope", async () => {
+        const page = { items: [detail], page: 1, pageSize: 20, total: 21 };
+        fetcher.mockResolvedValue(json(page));
+        expect(await listClasses()).toEqual(page);
+        const [url, init] = fetcher.mock.calls[0];
+        const parsed = new URL(String(url), "https://example.test");
+        expect(parsed.pathname).toBe("/api/academic/classes");
+        expect(Object.fromEntries(parsed.searchParams)).toEqual({ page: "1", pageSize: "20" });
+        expect(init?.method ?? "GET").toBe("GET");
+        expect(init?.body).toBeUndefined();
+        expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer academic-access-token");
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
+    it("encodes trimmed Unicode search as one parameter and requests page two", async () => {
+        const page = { items: [], page: 2, pageSize: 100, total: 1 };
+        const query = { search: "  Việt 🗓 &status=Finished?+  ", status: "Ongoing" as const, page: 2, pageSize: 100 };
+        const original = { ...query };
+        fetcher.mockResolvedValue(json(page));
+        expect(await listClasses(query)).toEqual(page);
+        const url = new URL(String(fetcher.mock.calls[0][0]), "https://example.test");
+        expect(Object.fromEntries(url.searchParams)).toEqual({ search: "Việt 🗓 &status=Finished?+", status: "Ongoing", page: "2", pageSize: "100" });
+        expect(query).toEqual(original);
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
+    it("omits blank search and absent status instead of sending undefined", async () => {
+        fetcher.mockResolvedValue(json({ items: [], page: 1, pageSize: 20, total: 0 }));
+        await listClasses({ search: "   " });
+        const url = new URL(String(fetcher.mock.calls[0][0]), "https://example.test");
+        expect(Object.fromEntries(url.searchParams)).toEqual({ page: "1", pageSize: "20" });
+    });
+
+    it.each([400, 403])("preserves list errors (%s), never disguising them as an empty page", async (status) => {
+        fetcher.mockResolvedValue(json({ title: "Invalid page", errors: { Page: ["Invalid page."] } }, status));
+        await expect(listClasses({ page: 2 })).rejects.toMatchObject({ status, errors: { Page: ["Invalid page."] } });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+});
