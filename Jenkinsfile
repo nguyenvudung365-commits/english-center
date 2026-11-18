@@ -5,16 +5,18 @@ pipeline {
         disableConcurrentBuilds()
         timeout(time: 40, unit: 'MINUTES')
     }
-    parameters {
-        booleanParam(name: 'DEPLOY', defaultValue: false, description: 'Triển khai R2 lên Docker host của agent, chỉ main; không tự SSH tới VPS.')
-    }
     environment {
         DOTNET_CLI_TELEMETRY_OPTOUT = '1'
         DOTNET_NOLOGO = '1'
     }
     stages {
         stage('Lấy mã nguồn') {
-            steps { checkout scm }
+            steps {
+                checkout scm
+                script {
+                    env.IMAGE_TAG = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                }
+            }
         }
         stage('Khôi phục và biên dịch') {
             steps {
@@ -27,6 +29,7 @@ pipeline {
                 sh 'bash tests/scripts/ci-postgres-tests.sh'
                 sh 'bash tests/scripts/ci-smoke-tests.sh'
                 sh 'bash tests/scripts/compose-storage-tests.sh'
+                sh 'bash tests/scripts/deploy-tests.sh'
                 sh 'dotnet test EnglishCenter.sln -c Release --no-build --logger trx --results-directory TestResults'
             }
         }
@@ -38,31 +41,36 @@ pipeline {
         }
         stage('Build frontend') {
             steps {
-                script {
-                    env.IMAGE_TAG = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
-                }
                 sh 'docker build -t "english-center-web:$IMAGE_TAG" frontend'
             }
         }
         stage('Build image bàn giao') {
             when { branch 'main' }
             steps {
-                script {
-                    env.IMAGE_TAG = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
-                }
                 sh 'docker build -t "english-center-api:$IMAGE_TAG" .'
             }
         }
-        stage('Triển khai') {
-            when { allOf { branch 'main'; expression { params.DEPLOY } } }
+        stage('Tự động triển khai VPS') {
+            when {
+                beforeAgent true
+                allOf {
+                    branch 'main'
+                    not { buildingTag() }
+                    not { changeRequest() }
+                    expression { env.ENGLISH_CENTER_AUTO_DEPLOY == 'true' }
+                }
+            }
+            agent { label 'english-center-production' }
             steps {
-                // Chỉ job main đáng tin cậy được cấp credential R2 theo .env.example.
+                deleteDir()
+                checkout scm
+                sh '''
+                    test "$(git rev-parse HEAD)" = "$IMAGE_TAG"
+                    docker build -t "english-center-api:$IMAGE_TAG" .
+                    docker build -t "english-center-web:$IMAGE_TAG" frontend
+                '''
                 withCredentials([file(credentialsId: 'english-center-deploy-env', variable: 'DEPLOY_ENV')]) {
-                    sh '''
-                        set +x
-                        docker compose --env-file "$DEPLOY_ENV" --project-name english-center -f compose.yaml -f compose.web.yaml config --quiet
-                        docker compose --env-file "$DEPLOY_ENV" --project-name english-center -f compose.yaml -f compose.web.yaml up -d --no-build --wait --wait-timeout 180
-                    '''
+                    sh 'set +x; bash scripts/deploy.sh'
                 }
             }
         }
