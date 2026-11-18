@@ -21,7 +21,16 @@ MOCK
 cat >"$work/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
 set -eu
-[[ "$IMAGE_TAG" =~ ^ec-ci-[0-9]+-[0-9]+$ ]]
+if [[ "$SCENARIO" == prebuilt ]]; then
+  [[ "$IMAGE_TAG" == "$PREBUILT_SHA" ]]
+else
+  [[ "$IMAGE_TAG" =~ ^ec-ci-[0-9]+-[0-9]+$ ]]
+fi
+if [[ "$1 $2" == 'image inspect' ]]; then
+  [[ "$SCENARIO" == prebuilt && "$*" == "image inspect english-center-api:$PREBUILT_SHA" ]]
+  echo 'image inspect' >>"$CALLS"
+  exit 0
+fi
 if [[ "$1 $2" == 'image rm' ]]; then
   [[ "$#" == 3 && "$3" == "english-center-api:$IMAGE_TAG" ]]
   echo 'image rm' >>"$CALLS"
@@ -34,7 +43,7 @@ if [[ "$1" == wait ]]; then
   if [[ "$SCENARIO" == init-fails ]]; then echo 1; else touch "$STATE/init-done"; echo 0; fi
   exit 0
 fi
-[[ "$1 $2 $3 $4" == 'compose --env-file /dev/null --project-name' && "$5" == "$IMAGE_TAG" && "$6 $7" == '-f compose.minio.yaml' ]]
+[[ "$1 $2 $3 $4" == 'compose --env-file /dev/null --project-name' && "$5" =~ ^ec-ci-[0-9]+-[0-9]+$ && "$6 $7" == '-f compose.minio.yaml' ]]
 shift 7
 printf '%s\n' "$*" >>"$CALLS"
 case "$*" in
@@ -49,7 +58,11 @@ case "$*" in
     [[ "$MEDIA_STORAGE_CORS_ORIGINS" == 'http://localhost:8088' ]]
     [[ "$SCENARIO" != config-fails ]] || exit 41 ;;
   'build api minio-init')
+    [[ "$SCENARIO" != prebuilt ]]
     [[ "$SCENARIO" != build-fails ]] || exit 42
+    touch "$STATE/built" ;;
+  'build minio-init')
+    [[ "$SCENARIO" == prebuilt ]]
     touch "$STATE/built" ;;
   'up -d --no-build --wait --wait-timeout 180 postgres minio')
     [[ -f "$STATE/built" ]]
@@ -64,7 +77,7 @@ case "$*" in
   'port minio 9000')
     [[ -f "$STATE/init-done" && ! -f "$STATE/api-ready" ]]
     echo '127.0.0.1:19000' ;;
-  'up -d --no-build --no-deps --wait --wait-timeout 180 api')
+  'up -d --no-build --no-deps --pull never --wait --wait-timeout 180 api')
     [[ -f "$STATE/init-done" && "$MEDIA_STORAGE_PUBLIC_ENDPOINT" == 'http://127.0.0.1:19000' ]]
     [[ "$SCENARIO" != api-fails ]] || exit 45
     touch "$STATE/api-ready" ;;
@@ -129,15 +142,18 @@ export MEDIA_STORAGE_PUBLIC_ENDPOINT=https://deployment.invalid
 export MEDIA_STORAGE_ENDPOINT=https://deployment.invalid
 export MEDIA_STORAGE_BUCKET=deployment-bucket MEDIA_STORAGE_REGION=auto
 export MEDIA_STORAGE_CORS_ORIGINS=https://deployment.invalid
-for SCENARIO in success config-fails build-fails infra-fails init-fails init-wait-fails api-fails health-fails login-fails student-fails logout-fails refresh-fails; do
+export PREBUILT_SHA=0123456789012345678901234567890123456789
+for SCENARIO in success prebuilt config-fails build-fails infra-fails init-fails init-wait-fails api-fails health-fails login-fails student-fails logout-fails refresh-fails; do
   export SCENARIO
   export STATE="$work/$SCENARIO" CALLS="$work/$SCENARIO/calls"
   mkdir -p "$STATE"
   : >"$CALLS"
   status=0
-  (cd "$work/project" && bash scripts/ci-smoke.sh) >"$STATE/output" 2>&1 || status=$?
+  args=()
+  [[ "$SCENARIO" != prebuilt ]] || args+=("$PREBUILT_SHA")
+  (cd "$work/project" && bash scripts/ci-smoke.sh "${args[@]}") >"$STATE/output" 2>&1 || status=$?
   case "$SCENARIO" in
-    success) expected=0 ;;
+    success|prebuilt) expected=0 ;;
     config-fails) expected=41 ;;
     build-fails) expected=42 ;;
     infra-fails) expected=43 ;;
@@ -150,14 +166,23 @@ for SCENARIO in success config-fails build-fails infra-fails init-fails init-wai
     echo "FAIL: $SCENARIO (expected exit $expected, got $status)" >&2
     exit 1
   fi
-  [[ "$(tail -n 2 "$CALLS")" == $'down --volumes --remove-orphans\nimage rm' ]]
-  ! grep -Fqf "$STATE/secrets" "$STATE/output"
-  ! grep -Eq 'deployment-access|deployment-secret|smoke-access|smoke-refresh' "$STATE/output"
-  if [[ "$SCENARIO" == success ]]; then
+  if [[ "$SCENARIO" == prebuilt ]]; then
+    grep -Fxq 'image inspect' "$CALLS"
+    [[ "$(tail -n 1 "$CALLS")" == 'down --volumes --remove-orphans' ]]
+  else
+    [[ "$(tail -n 2 "$CALLS")" == $'down --volumes --remove-orphans\nimage rm' ]]
+  fi
+  if grep -Fqf "$STATE/secrets" "$STATE/output" ||
+     grep -Eq 'deployment-access|deployment-secret|smoke-access|smoke-refresh' "$STATE/output"; then
+    echo "FAIL: $SCENARIO leaked a test secret" >&2
+    exit 1
+  fi
+  if [[ "$SCENARIO" == success || "$SCENARIO" == prebuilt ]]; then
     test "$(grep -c '^http://' "$CALLS")" = 6
     grep -q 'Dat: migration PostgreSQL' "$STATE/output"
-  else
-    ! grep -q 'Dat: migration PostgreSQL' "$STATE/output"
+  elif grep -q 'Dat: migration PostgreSQL' "$STATE/output"; then
+    echo "FAIL: $SCENARIO logged success" >&2
+    exit 1
   fi
   echo "PASS: $SCENARIO"
 done
