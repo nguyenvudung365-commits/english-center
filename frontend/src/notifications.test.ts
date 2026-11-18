@@ -16,6 +16,8 @@ describe("Thông báo", () => {
     it("ánh xạ đích thông báo tới route hiện có", () => {
         expect(notificationLink("Class", id)).toBe(`/classes/${id}`);
         expect(notificationLink("Assignment", id)).toBe(`/assignments/${id}`);
+        expect(notificationLink("Session", id)).toBe(`/schedule/${id}`);
+        expect(notificationLink("Session", "../admin")).toBeNull();
         expect(notificationLink("Invoice", id)).toBe("/invoices");
         expect(notificationLink("Warning", id)).toBe("/warnings");
     });

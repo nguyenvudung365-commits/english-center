@@ -14,6 +14,7 @@ internal sealed class ClassPostConfiguration : IEntityTypeConfiguration<ClassPos
         builder.Property(x => x.Content).HasMaxLength(4000).IsRequired();
         builder.Property(x => x.State).HasMaxLength(16).IsRequired();
         builder.HasIndex(x => new { x.ClassId, x.CreatedAt });
+        builder.HasIndex(x => new { x.AuthorId, x.CreatedAt });
     }
 }
 
@@ -28,6 +29,7 @@ internal sealed class PostCommentConfiguration : IEntityTypeConfiguration<PostCo
         builder.Property(x => x.State).HasMaxLength(16).IsRequired();
         builder.HasOne<ClassPost>().WithMany().HasForeignKey(x => x.PostId);
         builder.HasIndex(x => new { x.PostId, x.CreatedAt });
+        builder.HasIndex(x => new { x.AuthorId, x.CreatedAt });
     }
 }
 

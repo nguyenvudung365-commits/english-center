@@ -25,10 +25,11 @@ export function notificationLink(targetType: string, targetId: string): string |
     if (!isAcademicId(targetId)) return null;
     if (targetType === "Class") return `/classes/${targetId}`;
     if (targetType === "Assignment") return `/assignments/${targetId}`;
+    if (targetType === "Session") return `/schedule/${targetId}`;
     return null;
 }
 export const notificationLinkLabel = (targetType: string) =>
-    ({ Class: "Mở lớp học", Assignment: "Mở bài tập", Invoice: "Xem hóa đơn", Warning: "Xem cảnh báo" } as Record<string, string>)[targetType] ?? "";
+    ({ Class: "Mở lớp học", Assignment: "Mở bài tập", Session: "Xem buổi học", Invoice: "Xem hóa đơn", Warning: "Xem cảnh báo" } as Record<string, string>)[targetType] ?? "";
 
 // Huy hiệu chuông: "99+" khi lớn; aria-label luôn nói số thật.
 export const unreadBadge = (count: number | null) => (count && count > 0 ? (count > 99 ? "99+" : String(count)) : null);

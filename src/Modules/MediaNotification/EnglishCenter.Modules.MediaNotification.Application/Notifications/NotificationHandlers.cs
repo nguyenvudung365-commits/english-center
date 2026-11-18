@@ -14,7 +14,9 @@ public sealed class NotificationHandlers(INotificationStore store, IAssignmentDi
     IIntegrationEventHandler<InvoicePaidIntegrationEvent>,
     IIntegrationEventHandler<WarningIssuedIntegrationEvent>,
     IIntegrationEventHandler<AssignmentPublishedIntegrationEvent>,
-    IIntegrationEventHandler<SubmissionGradedIntegrationEvent>
+    IIntegrationEventHandler<SubmissionGradedIntegrationEvent>,
+    IIntegrationEventHandler<AttendanceRevisionRecordedIntegrationEvent>,
+    IIntegrationEventHandler<AssignmentMissedIntegrationEvent>
 {
     public Task HandleAsync(StudentEnrolledIntegrationEvent e, CancellationToken ct = default) => store.AddOnceAsync(
         [Make(e.StudentId, "StudentEnrolled", e.EnrollmentId, 0, "Bạn đã được ghi danh vào một lớp học", "Class", e.ClassId)], ct);
@@ -27,6 +29,13 @@ public sealed class NotificationHandlers(INotificationStore store, IAssignmentDi
 
     public Task HandleAsync(SubmissionGradedIntegrationEvent e, CancellationToken ct = default) => store.AddOnceAsync(
         [Make(e.StudentId, "SubmissionGraded", e.SubmissionId, e.GradeVersion, "Bài nộp của bạn đã được chấm điểm", "Assignment", e.AssignmentId)], ct);
+
+    // Khóa theo (AttendanceId, Revision): replay cùng revision không trùng, đổi trạng thái (revision mới) thì thông báo lại. Không nêu trạng thái.
+    public Task HandleAsync(AttendanceRevisionRecordedIntegrationEvent e, CancellationToken ct = default) => store.AddOnceAsync(
+        [Make(e.StudentId, "AttendanceRecorded", e.AttendanceId, e.Revision, "Điểm danh của bạn trong một buổi học có cập nhật", "Session", e.SessionId)], ct);
+
+    public Task HandleAsync(AssignmentMissedIntegrationEvent e, CancellationToken ct = default) => store.AddOnceAsync(
+        [Make(e.StudentId, "AssignmentMissed", e.AssignmentId, 0, "Bạn có một bài tập đã quá hạn nộp", "Assignment", e.AssignmentId)], ct);
 
     // Người nhận lấy từ snapshot lúc công bố (Academic contract); bài legacy không có snapshot thì không có thông báo.
     public async Task HandleAsync(AssignmentPublishedIntegrationEvent e, CancellationToken ct = default)

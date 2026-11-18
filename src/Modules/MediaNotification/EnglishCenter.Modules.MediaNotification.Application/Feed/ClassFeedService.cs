@@ -1,6 +1,7 @@
 ﻿using EnglishCenter.BuildingBlocks.Security;
 using EnglishCenter.Modules.Academic.Contracts;
 using EnglishCenter.Modules.Enrollment.Contracts;
+using EnglishCenter.Modules.Identity.Contracts;
 using EnglishCenter.Modules.MediaNotification.Application.Common;
 using EnglishCenter.Modules.MediaNotification.Domain.Feed;
 
@@ -8,10 +9,10 @@ namespace EnglishCenter.Modules.MediaNotification.Application.Feed;
 
 public sealed record ContentRequest(string? Content);
 public sealed record HiddenRequest(bool? Hidden);
-public sealed record PostResponse(Guid Id, Guid ClassId, Guid AuthorId, string AuthorRole, string Content, DateTime CreatedAtUtc,
-    DateTime? UpdatedAtUtc, bool IsHidden, int LikeCount, bool LikedByMe, int CommentCount);
-public sealed record CommentResponse(Guid Id, Guid PostId, Guid AuthorId, string AuthorRole, string Content, DateTime CreatedAtUtc,
-    DateTime? UpdatedAtUtc, bool IsHidden);
+public sealed record PostResponse(Guid Id, Guid ClassId, Guid AuthorId, string AuthorRole, string? AuthorName, string Content,
+    DateTime CreatedAtUtc, DateTime? UpdatedAtUtc, bool IsHidden, int LikeCount, bool LikedByMe, int CommentCount);
+public sealed record CommentResponse(Guid Id, Guid PostId, Guid AuthorId, string AuthorRole, string? AuthorName, string Content,
+    DateTime CreatedAtUtc, DateTime? UpdatedAtUtc, bool IsHidden);
 public sealed record LikeResponse(int LikeCount, bool LikedByMe);
 public sealed record PostView(ClassPost Post, int Likes, bool LikedByMe, int Comments);
 
@@ -22,6 +23,8 @@ public interface IClassFeedStore
     Task<ClassPost?> FindPostAsync(Guid id, CancellationToken ct);
     Task<PostComment?> FindCommentAsync(Guid id, CancellationToken ct);
     Task SaveAsync(CancellationToken ct);
+    // Đếm cả bài đã ẩn/xóa để không lách giới hạn bằng cách xóa bài.
+    Task<int> CountByAuthorSinceAsync(Guid author, DateTime since, CancellationToken ct);
     Task<PagedResult<PostView>> PostsAsync(Guid classId, bool includeHidden, Guid viewer, int page, int size, CancellationToken ct);
     Task<PagedResult<PostComment>> CommentsAsync(Guid postId, bool includeHidden, int page, int size, CancellationToken ct);
     // Like/unlike idempotent (khóa duy nhất PostId+UserId); trả số like hiện tại, không bao giờ âm.
@@ -30,8 +33,11 @@ public interface IClassFeedStore
 
 // Đọc/đăng: Student còn ghi danh active, Teacher đúng lớp, Staff/Admin. Mỗi request kiểm tra lại quyền lớp hiện tại.
 public sealed class ClassFeedService(IClassFeedStore store, MediaAccess access, IClassDirectory classes,
-    IEnrollmentAccess enrollment, TimeProvider clock)
+    IEnrollmentAccess enrollment, IUserDisplayDirectory users, TimeProvider clock)
 {
+    // shortcut: đếm rồi mới ghi nên request song song có thể vượt giới hạn vài bản ghi; cần khóa/bộ đếm nguyên tử nếu muốn chặt hơn.
+    private const int HourlyLimit = 30;
+
     private sealed record Scope(Actor Actor, bool Moderator);
 
     public async Task<PagedResult<PostResponse>> PostsAsync(Guid classId, int page, int size, CancellationToken ct)
@@ -39,15 +45,18 @@ public sealed class ClassFeedService(IClassFeedStore store, MediaAccess access, 
         var scope = await ScopeAsync(await ActorAsync(ct), classId, hideDenied: false, ct);
         (page, size) = Paging.Validate(page, size);
         var result = await store.PostsAsync(classId, scope.Moderator, scope.Actor.Id, page, size, ct);
-        return new(result.Items.Select(x => Response(x)).ToList(), result.Total, result.Page, result.PageSize);
+        var names = await users.FindNamesAsync(result.Items.Select(x => x.Post.AuthorId).ToList(), ct);
+        return new(result.Items.Select(x => Response(x, names.GetValueOrDefault(x.Post.AuthorId))).ToList(), result.Total, result.Page, result.PageSize);
     }
 
     public async Task<PostResponse> CreatePostAsync(Guid classId, ContentRequest request, CancellationToken ct)
     {
         var scope = await ScopeAsync(await ActorAsync(ct), classId, hideDenied: false, ct);
-        var post = ClassPost.Create(classId, scope.Actor.Id, scope.Actor.Role, Content(request, 4000), Now());
+        var content = Content(request, 4000);
+        await RequireWithinLimitAsync(scope.Actor.Id, ct);
+        var post = ClassPost.Create(classId, scope.Actor.Id, scope.Actor.Role, content, Now());
         await store.AddAsync(post, ct);
-        return Response(new PostView(post, 0, false, 0));
+        return Response(new PostView(post, 0, false, 0), await NameAsync(post.AuthorId, ct));
     }
 
     public async Task EditPostAsync(Guid id, ContentRequest request, CancellationToken ct)
@@ -85,15 +94,18 @@ public sealed class ClassFeedService(IClassFeedStore store, MediaAccess access, 
         var (post, scope) = await PostAsync(postId, ct);
         (page, size) = Paging.Validate(page, size);
         var result = await store.CommentsAsync(post.Id, scope.Moderator, page, size, ct);
-        return new(result.Items.Select(x => Response(x)).ToList(), result.Total, result.Page, result.PageSize);
+        var names = await users.FindNamesAsync(result.Items.Select(x => x.AuthorId).ToList(), ct);
+        return new(result.Items.Select(x => Response(x, names.GetValueOrDefault(x.AuthorId))).ToList(), result.Total, result.Page, result.PageSize);
     }
 
     public async Task<CommentResponse> CreateCommentAsync(Guid postId, ContentRequest request, CancellationToken ct)
     {
         var (post, scope) = await PostAsync(postId, ct);
-        var comment = PostComment.Create(post, scope.Actor.Id, scope.Actor.Role, Content(request, 1000), Now());
+        var content = Content(request, 1000);
+        await RequireWithinLimitAsync(scope.Actor.Id, ct);
+        var comment = PostComment.Create(post, scope.Actor.Id, scope.Actor.Role, content, Now());
         await store.AddAsync(comment, ct);
-        return Response(comment);
+        return Response(comment, await NameAsync(comment.AuthorId, ct));
     }
 
     public async Task<CommentResponse> EditCommentAsync(Guid id, ContentRequest request, CancellationToken ct)
@@ -102,7 +114,7 @@ public sealed class ClassFeedService(IClassFeedStore store, MediaAccess access, 
         RequireAuthor(comment, scope);
         comment.Edit(Content(request, 1000), Now());
         await store.SaveAsync(ct);
-        return Response(comment);
+        return Response(comment, await NameAsync(comment.AuthorId, ct));
     }
 
     public async Task RemoveCommentAsync(Guid id, CancellationToken ct)
@@ -166,11 +178,19 @@ public sealed class ClassFeedService(IClassFeedStore store, MediaAccess access, 
     private static string Content(ContentRequest request, int max) => Text.Clean(request.Content, max, "Content", multiline: true);
     private DateTime Now() => clock.GetUtcNow().UtcDateTime;
 
-    private static PostResponse Response(PostView x) => new(x.Post.Id, x.Post.ClassId, x.Post.AuthorId, x.Post.AuthorRole,
-        x.Post.Content, x.Post.CreatedAt, x.Post.UpdatedAt, x.Post.State == FeedState.Hidden, x.Likes, x.LikedByMe, x.Comments);
+    private async Task RequireWithinLimitAsync(Guid author, CancellationToken ct)
+    {
+        if (await store.CountByAuthorSinceAsync(author, Now().AddHours(-1), ct) >= HourlyLimit)
+            throw new MediaFailure(429, "Too many posts and comments; try again later.");
+    }
 
-    private static CommentResponse Response(PostComment x) => new(x.Id, x.PostId, x.AuthorId, x.AuthorRole, x.Content,
-        x.CreatedAt, x.UpdatedAt, x.State == FeedState.Hidden);
+    private async Task<string?> NameAsync(Guid id, CancellationToken ct) => (await users.FindNamesAsync([id], ct)).GetValueOrDefault(id);
+
+    private static PostResponse Response(PostView x, string? name) => new(x.Post.Id, x.Post.ClassId, x.Post.AuthorId, x.Post.AuthorRole,
+        name, x.Post.Content, x.Post.CreatedAt, x.Post.UpdatedAt, x.Post.State == FeedState.Hidden, x.Likes, x.LikedByMe, x.Comments);
+
+    private static CommentResponse Response(PostComment x, string? name) => new(x.Id, x.PostId, x.AuthorId, x.AuthorRole, name,
+        x.Content, x.CreatedAt, x.UpdatedAt, x.State == FeedState.Hidden);
 }
 
 

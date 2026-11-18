@@ -4,8 +4,8 @@ import { useRead } from "./academic-pages";
 import { useAction } from "./assignment-pages";
 import { ReadFeedback } from "./attendance-pages";
 import {
-    canModerateFeed, COMMENT_MAX, createComment, createPost, editComment, editPost, feedAccessMessage, hideComment, hidePost, isFeedAuthor,
-    listComments, listPosts, POST_MAX, removeComment, removePost, roleLabel, setLike, validateFeedContent, type Post, type PostComment,
+    authorLabel, canModerateFeed, COMMENT_MAX, createComment, createPost, editComment, editPost, feedAccessMessage, hideComment, hidePost, isFeedAuthor,
+    listComments, listPosts, POST_MAX, removeComment, removePost, setLike, validateFeedContent, type Post, type PostComment,
 } from "./feed";
 import { formatVnDateTime } from "./format";
 import { ErrorMessage, FieldError, fieldProps, Pager } from "./ui";
@@ -40,11 +40,11 @@ function ContentEditor({ id, label, max, initial = "", submitLabel, busy, onSubm
     </form>;
 }
 
-function Meta({ role, authorId, userId, created, updated, hidden }: {
-    role: string; authorId: string; userId: string; created: string; updated: string | null; hidden: boolean;
+function Meta({ role, name, authorId, userId, created, updated, hidden }: {
+    role: string; name: string | null; authorId: string; userId: string; created: string; updated: string | null; hidden: boolean;
 }) {
     return <p className="small muted">
-        <strong>{roleLabel(role)}{isFeedAuthor(userId, authorId) ? " (bạn)" : ""}</strong> · <time dateTime={created}>{formatVnDateTime(created)}</time> (UTC+7)
+        <strong>{authorLabel(name, role)}{isFeedAuthor(userId, authorId) ? " (bạn)" : ""}</strong> · <time dateTime={created}>{formatVnDateTime(created)}</time> (UTC+7)
         {updated && <> · đã sửa</>}{hidden && <> · <span className="pill">Đã ẩn</span></>}
     </p>;
 }
@@ -56,7 +56,7 @@ function CommentItem({ comment: initial, userId, role, reload }: { comment: Post
     const action = useAction();
     const author = isFeedAuthor(userId, comment.authorId);
     return <li>
-        <Meta role={comment.authorRole} authorId={comment.authorId} userId={userId} created={comment.createdAtUtc} updated={comment.updatedAtUtc} hidden={comment.isHidden} />
+        <Meta role={comment.authorRole} name={comment.authorName} authorId={comment.authorId} userId={userId} created={comment.createdAtUtc} updated={comment.updatedAtUtc} hidden={comment.isHidden} />
         {editing
             ? <ContentEditor id={`comment-edit-${comment.id}`} label="Sửa bình luận" max={COMMENT_MAX} initial={comment.content} submitLabel="Lưu" busy={action.busy}
                 onCancel={() => setEditing(false)} onSubmit={(text) => void action.run(() => editComment(comment.id, text), (updated) => { setComment(updated); setEditing(false); })} />
@@ -113,7 +113,7 @@ function PostItem({ post: initial, userId, role, reload }: { post: Post; userId:
     const action = useAction();
     const author = isFeedAuthor(userId, post.authorId);
     return <li>
-        <Meta role={post.authorRole} authorId={post.authorId} userId={userId} created={post.createdAtUtc} updated={post.updatedAtUtc} hidden={post.isHidden} />
+        <Meta role={post.authorRole} name={post.authorName} authorId={post.authorId} userId={userId} created={post.createdAtUtc} updated={post.updatedAtUtc} hidden={post.isHidden} />
         {editing
             ? <ContentEditor id={`post-edit-${post.id}`} label="Sửa bài đăng" max={POST_MAX} initial={post.content} submitLabel="Lưu" busy={action.busy}
                 onCancel={() => setEditing(false)}

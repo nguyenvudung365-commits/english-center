@@ -99,6 +99,8 @@ namespace EnglishCenter.Modules.MediaNotification.Infrastructure.Persistence.Mig
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AuthorId", "CreatedAt");
+
                     b.HasIndex("ClassId", "CreatedAt");
 
                     b.ToTable("class_posts", "media_notification");
@@ -147,6 +149,8 @@ namespace EnglishCenter.Modules.MediaNotification.Infrastructure.Persistence.Mig
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AuthorId", "CreatedAt");
 
                     b.HasIndex("PostId", "CreatedAt");
 

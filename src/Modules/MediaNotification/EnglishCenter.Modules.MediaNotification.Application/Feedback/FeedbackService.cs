@@ -13,6 +13,7 @@ public interface IFeedbackStore
 {
     Task AddAsync(StudentFeedback item, CancellationToken ct);
     Task<StudentFeedback?> FindAsync(Guid id, CancellationToken ct);
+    Task<int> CountSinceAsync(Guid student, DateTime since, CancellationToken ct);
     // false khi bản ghi đã bị người khác đổi (revision lệch) giữa lúc đọc và lúc lưu.
     Task<bool> TrySaveAsync(CancellationToken ct);
     Task<PagedResult<StudentFeedback>> ListAsync(Guid? student, string? status, string? search, int page, int size, CancellationToken ct);
@@ -20,13 +21,19 @@ public interface IFeedbackStore
 
 public sealed class FeedbackService(IFeedbackStore store, MediaAccess access, TimeProvider clock)
 {
+    private const int HourlyLimit = 5;
+
     public async Task<FeedbackResponse> CreateAsync(FeedbackRequest request, CancellationToken ct)
     {
         var actor = await access.ActiveAsync(ct, Roles.Student);
         var title = Text.Clean(request.Title, 150, "Title");
         var content = Text.Clean(request.Content, 2000, "Content", multiline: true);
         if (request.Rating is not (>= 1 and <= 5)) throw new MediaFailure(400, "Rating must be between 1 and 5.");
-        var item = StudentFeedback.Create(actor.Id, title, content, request.Rating.Value, clock.GetUtcNow().UtcDateTime);
+        var now = clock.GetUtcNow().UtcDateTime;
+        // shortcut: đếm rồi mới ghi nên request song song có thể vượt giới hạn vài bản ghi; cần bộ đếm nguyên tử nếu muốn chặt hơn.
+        if (await store.CountSinceAsync(actor.Id, now.AddHours(-1), ct) >= HourlyLimit)
+            throw new MediaFailure(429, "Too many feedback submissions; try again later.");
+        var item = StudentFeedback.Create(actor.Id, title, content, request.Rating.Value, now);
         await store.AddAsync(item, ct);
         return Response(item, actor);
     }
