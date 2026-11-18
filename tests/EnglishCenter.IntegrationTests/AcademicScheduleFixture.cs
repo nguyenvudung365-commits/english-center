@@ -51,16 +51,20 @@ internal sealed class AcademicScheduleFixture(string? postgres = null, IIntercep
         var identity = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
         var academic = scope.ServiceProvider.GetRequiredService<AcademicDbContext>();
         var enrollment = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+        // Thông báo điểm danh ghi vào DB media khi event được phát, nên host phải có sẵn bảng này.
+        var media = scope.ServiceProvider.GetRequiredService<MediaNotificationDbContext>();
         if (postgres is null)
         {
             await identity.Database.EnsureCreatedAsync();
             await academic.Database.EnsureCreatedAsync();
             await enrollment.Database.EnsureCreatedAsync();
+            await media.Database.EnsureCreatedAsync();
         }
         else
         {
             await identity.Database.MigrateAsync();
             await enrollment.Database.MigrateAsync();
+            await media.Database.MigrateAsync();
             await academic.GetService<IMigrator>().MigrateAsync(academicMigration);
         }
 

@@ -167,7 +167,8 @@ export function Classes() {
 function classStatus(status: string) {
     return ({ Upcoming: "Sắp khai giảng", Ongoing: "Đang học", Finished: "Đã kết thúc" } as Record<string, string>)[status] ?? status;
 }
-export function ClassDetails() {
+// `feed` được truyền từ main để tránh import vòng với feed-pages (dùng useRead ở đây).
+export function ClassDetails({ feed }: { feed?: (classId: string) => ReactNode }) {
     const { id = "" } = useParams();
     const load = useCallback(() => getClass(id), [id]);
     const result = useRead(load);
@@ -256,6 +257,7 @@ export function ClassDetails() {
                     </div>
                 </section>
             )}
+            {item && feed?.(item.id)}
         </>
     );
 }

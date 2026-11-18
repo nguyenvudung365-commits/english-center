@@ -79,11 +79,11 @@ public sealed class MediaFilePostgresTests : IAsyncLifetime
         {
             var actual = new List<(string Schema, string Table)>();
             while (await reader.ReadAsync()) actual.Add((reader.GetString(0), reader.GetString(1)));
+            // Sắp theo thứ tự ordinal để không phụ thuộc collation của máy chủ.
             Assert.Equal(new[]
             {
-                (MediaNotificationSchema.Name, "__EFMigrationsHistory"),
-                (MediaNotificationSchema.Name, "stored_files")
-            }, actual);
+                "__EFMigrationsHistory", "class_posts", "faqs", "feedbacks", "notifications", "post_comments", "post_likes", "stored_files"
+            }.Select(table => (MediaNotificationSchema.Name, table)), actual.OrderBy(x => x.Table, StringComparer.Ordinal));
         }
 
         await using var history = new NpgsqlCommand(
