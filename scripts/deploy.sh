@@ -3,6 +3,11 @@ set -euo pipefail
 
 [[ ${IMAGE_TAG:-} =~ ^[a-f0-9]{40}$ ]] || { echo 'Thiếu IMAGE_TAG là SHA đầy đủ.' >&2; exit 1; }
 [[ -n ${DEPLOY_ENV:-} && -r $DEPLOY_ENV ]] || { echo 'Không đọc được credential file deploy.' >&2; exit 1; }
+package='ghcr.io/nguyenvudung365-commits/english-center'
+if [[ ! ${ENGLISH_CENTER_API_IMAGE:-} =~ ^${package//./\.}-api@sha256:[a-f0-9]{64}$ ||
+      ! ${ENGLISH_CENTER_WEB_IMAGE:-} =~ ^${package//./\.}-web@sha256:[a-f0-9]{64}$ ]]; then
+  echo 'Thiếu cặp digest GHCR API/web đã xác minh.' >&2; exit 1
+fi
 
 compose=(docker compose --env-file "$DEPLOY_ENV" --project-name english-center)
 if [[ ${ENGLISH_CENTER_VPS_COMPOSE_FILES:-} == 'compose.yaml:compose.web.yaml' ]]; then
@@ -18,24 +23,26 @@ elif [[ -n ${ENGLISH_CENTER_VPS_COMPOSE_FILES:-} ]]; then
 else
   echo 'Cần cấu hình ENGLISH_CENTER_VPS_COMPOSE_FILES theo stack VPS hiện tại.' >&2; exit 1
 fi
+compose+=(-f "$PWD/compose.release.yaml")
 
 run_compose() {
   # Compose có thể ghi nội dung dòng lỗi của secret file lên stderr.
   COMPOSE_REMOVE_ORPHANS=false "${compose[@]}" "$@" 2>/dev/null
 }
 
-if ! run_compose config --format json | jq -e --arg tag "$IMAGE_TAG" '
+if ! run_compose config --format json | jq -e --arg api "$ENGLISH_CENTER_API_IMAGE" --arg web "$ENGLISH_CENTER_WEB_IMAGE" '
   def health_enabled: .healthcheck.disable != true and .healthcheck.test[0] != "NONE";
-  .services.api.image == ("english-center-api:" + $tag) and
-  .services.web.image == ("english-center-web:" + $tag) and
+  .services.api.image == $api and .services.web.image == $web and
   (.services.api | health_enabled) and (.services.web | health_enabled) and
   .services.postgres != null
 ' >/dev/null 2>&1; then
-  echo 'Compose không hợp lệ: kiểm tra secret file, image theo SHA và health check API/web.' >&2; exit 1
+  echo 'Compose không hợp lệ: kiểm tra secret file, digest và health check API/web.' >&2; exit 1
 fi
-if ! docker image inspect --format '{{json .Config.Healthcheck}}' "english-center-api:$IMAGE_TAG" "english-center-web:$IMAGE_TAG" 2>/dev/null |
-  jq -se 'length == 2 and all(.[]; .Test[0] == "CMD" or .Test[0] == "CMD-SHELL")' >/dev/null 2>&1; then
-  echo 'Thiếu image theo SHA hoặc image API/web không có health check.' >&2; exit 1
+if ! docker image inspect --format '{{json .Config}}' "$ENGLISH_CENTER_API_IMAGE" "$ENGLISH_CENTER_WEB_IMAGE" 2>/dev/null |
+  jq -se --arg sha "$IMAGE_TAG" 'length == 2 and all(.[];
+    .Labels["org.opencontainers.image.revision"] == $sha and
+    (.Healthcheck.Test[0] == "CMD" or .Healthcheck.Test[0] == "CMD-SHELL"))' >/dev/null 2>&1; then
+  echo 'Thiếu image API/web đúng commit hoặc image không có health check.' >&2; exit 1
 fi
 
 # Không khởi tạo DB mới hoặc recreate PostgreSQL trong một lần cập nhật ứng dụng.
@@ -47,6 +54,7 @@ if [[ -z $postgres || $(docker inspect --format '{{.State.Health.Status}} {{rang
   exit 1
 fi
 
+bash "$(dirname "${BASH_SOURCE[0]}")/verified-release.sh" --check-main
 if ! run_compose up -d --no-deps --no-build --pull never --wait --wait-timeout 180 api >/dev/null; then
   # Reload proxy hiện tại nếu API đã đổi IP trước khi health check thất bại.
   if ! run_compose exec -T web nginx -s reload >/dev/null; then

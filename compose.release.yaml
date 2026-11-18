@@ -1,0 +1,6 @@
+# Applied last by scripts/deploy.sh; no changes to PostgreSQL or other services.
+services:
+  api:
+    image: ${ENGLISH_CENTER_API_IMAGE:?Missing verified API image}
+  web:
+    image: ${ENGLISH_CENTER_WEB_IMAGE:?Missing verified web image}

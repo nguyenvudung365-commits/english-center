@@ -45,7 +45,7 @@ docker compose -f compose.yaml -f compose.web.yaml up -d --build
 
 Web mặc định `http://127.0.0.1:8088`, API proxy cùng origin tại `/api/`; `/web-health` chỉ kiểm tra web, không chứng minh DB hay storage khỏe. Compose gốc dùng **R2**, hai endpoint trong `.env` dùng S3 API HTTPS của R2 (không thêm tên bucket), region `auto`; không chạy MinIO. Bucket private, token Object Read & Write giới hạn bucket, CORS cấu hình trực tiếp trên Cloudflare theo origin frontend. Không dùng domain website/`r2.dev` làm endpoint ký URL.
 
-MinIO chỉ cho local/test: dùng `.env.minio.example` làm mẫu cho `.env.minio`, rồi `docker compose --env-file .env.minio --project-name english-center-local -f compose.minio.yaml -f compose.web.yaml up -d --build`. Đây là stack riêng, không ghép với `compose.yaml`, không dùng database/secret VPS. Xem [cấu hình auto-deploy Jenkins](../README.md#bật-auto-deploy-jenkins--vps) để tự cập nhật API/web trên VPS sau khi `main` qua CI.
+MinIO chỉ cho local/test: dùng `.env.minio.example` làm mẫu cho `.env.minio`, rồi `docker compose --env-file .env.minio --project-name english-center-local -f compose.minio.yaml -f compose.web.yaml up -d --build`. Đây là stack riêng, không ghép với `compose.yaml`, không dùng database/secret VPS. Xem [cấu hình auto-deploy Jenkins](../README.md#bật-auto-deploy-jenkins--vps) để tự cập nhật API/web từ image GHCR đã qua CI trên `main`.
 
 VPS: dùng reverse proxy HTTPS trên host đến `127.0.0.1:8088`. Ví dụ Caddy sau khi DNS A trỏ đúng VPS và mở 80/443:
 

@@ -6,9 +6,18 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 export PATH="$work:$PATH" DEPLOY_ENV="$work/deploy.env" CALLS="$work/calls"
 export IMAGE_TAG=0123456789012345678901234567890123456789
+export ENGLISH_CENTER_API_IMAGE=ghcr.io/nguyenvudung365-commits/english-center-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+export ENGLISH_CENTER_WEB_IMAGE=ghcr.io/nguyenvudung365-commits/english-center-web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 touch "$DEPLOY_ENV" "$work/compose.vps.yaml" "$work/compose.release.yaml"
 export ENGLISH_CENTER_VPS_COMPOSE_FILES=compose.yaml:compose.web.yaml
 
+cat >"$work/git" <<'MOCK'
+#!/usr/bin/env bash
+set -eu
+[[ $* == 'ls-remote --exit-code https://github.com/nguyenvudung365-commits/english-center.git refs/heads/main' ]]
+[[ $SCENARIO != stale ]]
+printf '%s\trefs/heads/main\n' "$IMAGE_TAG"
+MOCK
 cat >"$work/docker" <<'MOCK'
 #!/usr/bin/env bash
 set -eu
@@ -22,10 +31,12 @@ if [[ $1 == inspect ]]; then
   exit 0
 fi
 if [[ "$1 $2" == 'image inspect' ]]; then
-  [[ $3 == --format && $5 == "english-center-api:$IMAGE_TAG" && $6 == "english-center-web:$IMAGE_TAG" ]]
+  [[ $3 == --format && $5 == "$ENGLISH_CENTER_API_IMAGE" && $6 == "$ENGLISH_CENTER_WEB_IMAGE" ]]
   [[ $SCENARIO != missing-image ]]
-  if [[ $SCENARIO == missing-health ]]; then echo null; else echo '{"Test":["CMD-SHELL","probe"]}'; fi
-  echo '{"Test":["CMD-SHELL","probe"]}'
+  revision=$IMAGE_TAG health='{"Test":["CMD-SHELL","probe"]}'
+  [[ $SCENARIO != missing-health ]] || health=null
+  [[ $SCENARIO != wrong-revision ]] || revision=other
+  printf '{"Labels":{"org.opencontainers.image.revision":"%s"},"Healthcheck":%s}\n' "$revision" "$health" "$IMAGE_TAG" '{"Test":["CMD-SHELL","probe"]}'
   exit 0
 fi
 [[ $COMPOSE_REMOVE_ORPHANS == false ]]
@@ -37,13 +48,15 @@ else
   [[ "$1 $2 $3 $4" == '-f compose.yaml -f compose.web.yaml' ]]
 fi
 shift 4
+[[ $1 == -f && $2 == */compose.release.yaml ]]
+shift 2
 echo "$*" >>"$CALLS"
 case "$*" in
   'config --format json')
-    tag=$IMAGE_TAG
-    if [[ $SCENARIO == wrong-image ]]; then tag=local; fi
+    api=$ENGLISH_CENTER_API_IMAGE
+    if [[ $SCENARIO == wrong-image ]]; then api=english-center-api:local; fi
     if [[ $SCENARIO == invalid-config ]]; then echo 'test-secret-value' >&2; exit 42; fi
-    printf '{"services":{"api":{"image":"english-center-api:%s"},"web":{"image":"english-center-web:%s"},"postgres":{}}}\n' "$tag" "$IMAGE_TAG" ;;
+    printf '{"services":{"api":{"image":"%s"},"web":{"image":"%s"},"postgres":{}}}\n' "$api" "$ENGLISH_CENTER_WEB_IMAGE" ;;
   'ps --status running --quiet postgres')
     [[ $SCENARIO == missing-db ]] || echo postgres-id ;;
   'up -d --no-deps --no-build --pull never --wait --wait-timeout 180 api')
@@ -57,7 +70,7 @@ case "$*" in
   *) exit 99 ;;
 esac
 MOCK
-chmod +x "$work/docker"
+chmod +x "$work/"{docker,git}
 
 run_case() {
   : >"$CALLS"
@@ -81,9 +94,11 @@ exec -T web wget -q -O - -T 10 http://127.0.0.1:8080/api/identity/ping
 EXPECTED
 diff -u "$work/expected" "$CALLS"
 ENGLISH_CENTER_VPS_COMPOSE_FILES="$work/compose.vps.yaml:$work/compose.release.yaml" run_case existing-vps pass
-ENGLISH_CENTER_VPS_COMPOSE_FILES= run_case missing-compose fail
+ENGLISH_CENTER_VPS_COMPOSE_FILES='' run_case missing-compose fail
 [[ ! -s $CALLS ]]
-for scenario in wrong-image missing-image missing-health missing-db wrong-volume unhealthy-db invalid-config; do
+ENGLISH_CENTER_WEB_IMAGE=english-center-web:deploy run_case invalid-digest fail
+[[ ! -s $CALLS ]]
+for scenario in stale wrong-image missing-image missing-health wrong-revision missing-db wrong-volume unhealthy-db invalid-config; do
   run_case "$scenario" fail
   if grep -q '^up ' "$CALLS"; then echo "Unexpected rollout: $scenario" >&2; exit 1; fi
 done

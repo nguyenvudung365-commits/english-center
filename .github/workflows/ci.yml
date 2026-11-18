@@ -10,8 +10,12 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -48,6 +52,10 @@ jobs:
           TV3_POSTGRES: Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=ci-test-only
           ENGLISHCENTER_TEST_POSTGRES: Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=ci-test-only
         run: dotnet test EnglishCenter.sln -c Release --no-build --logger trx --results-directory TestResults
+      - name: Xác nhận bộ test Identity và Media chạy trên PostgreSQL thật
+        run: |
+          bash tests/scripts/ci-postgres-tests.sh
+          bash scripts/ci-postgres.sh
       - name: Lưu kết quả kiểm thử
         if: always()
         uses: actions/upload-artifact@v4
@@ -60,6 +68,9 @@ jobs:
     needs: build-and-test
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      API_IMAGE: english-center-api:${{ github.sha }}
+      WEB_IMAGE: english-center-web:${{ github.sha }}
     steps:
       - name: Lấy mã nguồn
         uses: actions/checkout@v4
@@ -68,5 +79,66 @@ jobs:
           bash tests/scripts/compose-storage-tests.sh
           bash tests/scripts/ci-smoke-tests.sh
           bash tests/scripts/deploy-tests.sh
+          bash tests/scripts/verified-release-tests.sh
       - name: Build image và kiểm tra PostgreSQL, Identity, MinIO
-        run: bash scripts/ci-smoke.sh
+        run: |
+          docker build --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$API_IMAGE" .
+          bash scripts/ci-smoke.sh "$GITHUB_SHA"
+      - name: Build và test image web
+        run: |
+          docker build --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$WEB_IMAGE" frontend
+      - name: Đóng gói đúng cặp image đã kiểm tra
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: docker save "$API_IMAGE" "$WEB_IMAGE" | gzip > release-images.tar.gz
+      - name: Chuyển image sang job xuất bản
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-images
+          path: release-images.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+          overwrite: true
+  publish-images:
+    name: publish-images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: container-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      packages: write
+    steps:
+      - name: Tải image từ job đã kiểm tra
+        uses: actions/download-artifact@v4
+        with:
+          name: release-images
+      - name: Xuất bản cặp image lên GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker load --input release-images.tar.gz
+          package="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tag="$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null' EXIT
+          digests=()
+          for service in api web; do
+            image="$package-$service:$tag"
+            docker tag "english-center-$service:$GITHUB_SHA" "$image"
+            output="$(docker push "$image" | tee /dev/stderr)"
+            digest="$(awk '$2 == "digest:" {print $3}' <<<"$output")"
+            [[ $digest =~ ^sha256:[a-f0-9]{64}$ ]]
+            digests+=("$digest")
+          done
+          jq -n --arg sha "$GITHUB_SHA" --arg api "${digests[0]}" --arg web "${digests[1]}" \
+            '{sha:$sha,api:$api,web:$web}' > release.json
+      - name: Xác nhận cặp digest đã xuất bản
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-digests-${{ github.run_attempt }}
+          path: release.json
+          if-no-files-found: error
+          retention-days: 90

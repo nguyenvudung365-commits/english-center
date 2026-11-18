@@ -9,7 +9,7 @@ import os
 import subprocess
 
 env = {k: v for k, v in os.environ.items() if not k.startswith(
-    ('MEDIA_STORAGE_', 'MINIO_', 'POSTGRES_', 'JWT_', 'BOOTSTRAP_', 'COMPOSE_'))
+    ('MEDIA_STORAGE_', 'MINIO_', 'POSTGRES_', 'JWT_', 'BOOTSTRAP_', 'COMPOSE_', 'ENGLISH_CENTER_'))
     and k not in ('API_PORT', 'WEB_PORT', 'IMAGE_TAG')}
 env.update(POSTGRES_PASSWORD='test-db-only', JWT_SIGNING_KEY='a' * 48,
            MEDIA_STORAGE_ENDPOINT='https://example.r2.cloudflarestorage.com',
@@ -77,6 +77,18 @@ assert set(web['services']) == {'api', 'postgres', 'web'}
 loopback(web['services']['web'])
 render(['compose.yaml', 'compose.web.yaml'], env_file='.env.example')
 print('PASS: R2 web overlay and environment example')
+
+files = ['compose.yaml', 'compose.web.yaml', 'compose.release.yaml']
+release_env = dict(env, ENGLISH_CENTER_API_IMAGE='ghcr.io/example/api@sha256:' + 'a' * 64,
+                   ENGLISH_CENTER_WEB_IMAGE='ghcr.io/example/web@sha256:' + 'b' * 64)
+render(files, success=False)
+release = render(files, release_env)
+assert release['volumes'] == web['volumes']
+assert release['services']['postgres'] == web['services']['postgres']
+for service in ('api', 'web'):
+    assert release['services'][service] == dict(
+        web['services'][service], image=release_env[f'ENGLISH_CENTER_{service.upper()}_IMAGE'])
+print('PASS: release overlay replaces only API and web images by digest')
 
 local_env = dict(env, MINIO_ROOT_USER='local-root-only', MINIO_ROOT_PASSWORD='local-root-secret')
 local_env.update(MEDIA_STORAGE_PUBLIC_ENDPOINT='http://localhost:9000',
