@@ -10,6 +10,8 @@ export type Submission = {
     id: string; assignmentId: string; studentId: string; revision: string; submittedAt: string;
     files: { fileId: string; fileName: string; contentType: string; sizeBytes: number }[];
     score: number | null; feedback: string | null; gradeVersion: number; gradedAt: string | null; gradedBy: string | null;
+    // Chỉ có ở màn hình giáo viên/nhân viên; null khi Identity không trả tên (ví dụ tài khoản bị khóa).
+    studentName?: string | null; studentCode?: string | null;
 };
 export type UploadStatus = "uploading" | "confirming" | "confirmed";
 const types: Record<string, string> = {

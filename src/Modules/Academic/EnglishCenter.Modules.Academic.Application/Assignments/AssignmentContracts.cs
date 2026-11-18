@@ -18,16 +18,25 @@ public sealed record AssignmentResponse(Guid Id, Guid ClassId, string Title, str
     DateTimeOffset ClosesAtUtc, string Kind, string? Unit, string? Lesson, Guid? SessionId, bool IsLegacy, string Status,
     DateTimeOffset? PublishedAt, DateTimeOffset? CreatedAt, int Version);
 public sealed record SubmissionFileResponse(Guid FileId, string FileName, string ContentType, long SizeBytes);
+// StudentName/StudentCode: chỉ có ở màn hình của giáo viên/nhân viên (danh sách bài nộp, kết quả chấm); null nếu Identity
+// không trả tên (tài khoản bị khóa/không còn là học viên) — frontend hiển thị ID thay thế.
 public sealed record SubmissionResponse(Guid Id, Guid AssignmentId, Guid StudentId, Guid Revision, DateTimeOffset SubmittedAt,
     IReadOnlyList<SubmissionFileResponse> Files, decimal? Score = null, string? Feedback = null, int GradeVersion = 0,
-    DateTimeOffset? GradedAt = null, Guid? GradedBy = null);
+    DateTimeOffset? GradedAt = null, Guid? GradedBy = null, string? StudentName = null, string? StudentCode = null);
 public sealed record GradeHistoryResponse(int Version, decimal Score, decimal? PreviousScore, string? Feedback, Guid GradedBy,
     string? GradedByName, DateTimeOffset GradedAt);
 // Trạng thái của học viên với một bài: NotSubmitted | Submitted | Graded | Missed | Exempted.
 public sealed record StudentAssignmentResponse(AssignmentResponse Assignment, string SubmissionStatus, bool IsObligated,
     Guid? SubmissionId, DateTimeOffset? SubmittedAt, decimal? Score, string? Feedback, DateTimeOffset? GradedAt);
 public sealed record RecipientResponse(Guid StudentId, DateTimeOffset AssignedAt, string Outcome, string SubmissionStatus,
-    Guid? SubmissionId, DateTimeOffset? SubmittedAt, decimal? Score, int GradeVersion);
+    Guid? SubmissionId, DateTimeOffset? SubmittedAt, decimal? Score, int GradeVersion, string? StudentName = null,
+    string? StudentCode = null);
+// Đối soát chỉ đọc trước khi bật Academic:Coursework:ResolveMissed: nếu worker chốt ngay lúc này thì mỗi bài ra kết quả gì.
+public sealed record MissedPreviewStudent(Guid StudentId, string? StudentName, string? StudentCode);
+public sealed record MissedPreviewAssignment(Guid AssignmentId, Guid ClassId, string Title, DateTimeOffset ClosesAtUtc,
+    int Pending, int Submitted, int Exempted, IReadOnlyList<MissedPreviewStudent> Missed);
+public sealed record MissedPreviewResponse(DateTimeOffset CheckedAtUtc, int Assignments, int Submitted, int Missed, int Exempted,
+    bool HasMore, IReadOnlyList<MissedPreviewAssignment> Items);
 public sealed record ReplayEventsResponse(int Published, int Graded, int Missed);
 public sealed record PageResponse<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);
 public sealed record FileDownloadResponse(Uri Url, DateTimeOffset ExpiresAt);

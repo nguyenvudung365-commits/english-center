@@ -40,6 +40,7 @@ public sealed class SubmissionApiTests : IAsyncLifetime
     private HttpClient client = null!;
     private readonly Dictionary<string, Guid> users = [];
     private Guid classId;
+    private Guid classSessionId;
 
     public async Task InitializeAsync()
     {
@@ -74,6 +75,7 @@ public sealed class SubmissionApiTests : IAsyncLifetime
             enrollment.Students.Add(new Student(users[name], name, $"{name}@example.test"));
         enrollment.Classes.Add(new ClassSnapshot(item.Id, item.Code, item.StartDate, item.EndDate, item.MaxStudents, item.TuitionFee));
         await enrollment.SaveChangesAsync();
+        classSessionId = await CourseworkSessions.SeedAsync(factory.Services, classId);
     }
 
     public async Task DisposeAsync() { client.Dispose(); await factory.DisposeAsync(); }
@@ -115,7 +117,7 @@ public sealed class SubmissionApiTests : IAsyncLifetime
         var response = await client.PostAsJsonAsync("/api/academic/assignments", new
         {
             classId, title = "Nộp bài nhiều file", description = "PDF và hình ảnh",
-            opensAtUtc = now.AddHours(-2), closesAtUtc = expired ? now.AddHours(-1) : now.AddHours(2)
+            opensAtUtc = now.AddHours(-2), closesAtUtc = expired ? now.AddHours(-1) : now.AddHours(2), sessionId = classSessionId
         });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await Json(response)).GetProperty("id").GetGuid();
@@ -290,7 +292,7 @@ public sealed class SubmissionApiTests : IAsyncLifetime
     public async Task AssignmentCreation_RequiresAssignedTeacherOrManagerAndValidWindow()
     {
         var now = DateTimeOffset.UtcNow;
-        var request = new { classId, title = "Work", description = "", opensAtUtc = now.AddHours(-1), closesAtUtc = now.AddHours(1) };
+        var request = new { classId, title = "Work", description = "", opensAtUtc = now.AddHours(-1), closesAtUtc = now.AddHours(1), sessionId = classSessionId };
         await As("other-teacher");
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/academic/assignments", request)).StatusCode);
         await As("student");
@@ -305,7 +307,7 @@ public sealed class SubmissionApiTests : IAsyncLifetime
     {
         await Enroll(); await As("teacher");
         var now = DateTimeOffset.UtcNow;
-        var created = await client.PostAsJsonAsync("/api/academic/assignments", new { classId, title = "Future", opensAtUtc = now.AddHours(1), closesAtUtc = now.AddHours(2) });
+        var created = await client.PostAsJsonAsync("/api/academic/assignments", new { classId, title = "Future", opensAtUtc = now.AddHours(1), closesAtUtc = now.AddHours(2), sessionId = classSessionId });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var id = (await Json(created)).GetProperty("id").GetGuid();
         var file = await File(); await As("student");

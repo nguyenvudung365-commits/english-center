@@ -9,6 +9,10 @@ namespace EnglishCenter.Modules.Academic.Application.Assignments;
 public sealed record ReconcileResult(int PublishedRetried, int GradesRetried, int AssignmentsResolved, int Missed, int Exempted,
     int MissedSent, int DeliveryFailed = 0);
 
+// Kết quả đối soát chỉ đọc của một bài: các học viên đang Pending nếu chốt ngay bây giờ sẽ thuộc nhóm nào.
+public sealed record MissedPreviewItem(Guid AssignmentId, Guid ClassId, string Title, DateTimeOffset ClosesAtUtc, int Pending,
+    int Submitted, int Exempted, IReadOnlyList<Guid> MissedStudentIds);
+
 /// <summary>
 /// Việc chạy định kỳ (worker) hoặc gọi tay trong test/đối soát:
 /// 1) phát lại AssignmentPublished/SubmissionGraded đã commit nhưng chưa đánh dấu đã gửi (crash giữa commit và publish,
@@ -85,6 +89,31 @@ public sealed class CourseworkReconciler(IAssignmentStore store, IEnrollmentAcce
         return result;
     }
 
+    /// <summary>
+    /// Đối soát chỉ đọc (dùng trước khi bật ResolveMissed): áp dụng đúng quy tắc chốt của worker cho các bài đã quá hạn
+    /// mà chưa chốt, nhưng KHÔNG ghi kết quả và KHÔNG phát event.
+    /// </summary>
+    public async Task<IReadOnlyList<MissedPreviewItem>> PreviewAsync(int max, CancellationToken ct)
+    {
+        var result = new List<MissedPreviewItem>();
+        foreach (var item in await store.DueUnresolvedAsync(clock.GetUtcNow() - Grace, max, ct))
+        {
+            var submissions = (await store.AllSubmissionsAsync(item.Id, ct)).ToDictionary(x => x.StudentId);
+            var pending = (await store.RecipientsAsync(item.Id, ct)).Where(x => x.Outcome == ObligationOutcome.Pending).ToList();
+            int submitted = 0, exempted = 0;
+            var missed = new List<Guid>();
+            foreach (var recipient in pending)
+                switch (await ClassifyAsync(item, recipient, submissions, ct))
+                {
+                    case ObligationOutcome.Submitted: submitted++; break;
+                    case ObligationOutcome.Exempted: exempted++; break;
+                    default: missed.Add(recipient.StudentId); break;
+                }
+            result.Add(new(item.Id, item.ClassId, item.Title, item.ClosesAtUtc, pending.Count, submitted, exempted, missed));
+        }
+        return result;
+    }
+
     // Chốt toàn bộ nghĩa vụ của một bài trong một transaction; trạng thái cuối không bị mở lại.
     private async Task<(int Missed, int Exempted)> ResolveAsync(Assignment item, DateTimeOffset now, CancellationToken ct)
     {
@@ -93,16 +122,23 @@ public sealed class CourseworkReconciler(IAssignmentStore store, IEnrollmentAcce
         int missed = 0, exempted = 0;
         foreach (var recipient in (await store.RecipientsAsync(item.Id, ct)).Where(x => x.Outcome == ObligationOutcome.Pending))
         {
-            if (submissions.TryGetValue(recipient.StudentId, out var s) && s.SubmittedAt < item.ClosesAtUtc)
-                recipient.Resolve(ObligationOutcome.Submitted, now);
-            // Quyền lớp đã bị thu hồi khi chốt → miễn. Enrollment chưa có lịch sử thời điểm thu hồi, nên trường hợp
-            // thu hồi giữa hạn nộp và lúc worker chạy cũng được miễn (thiên về không phạt sai).
-            else if (!await enrollment.IsActiveAsync(item.ClassId, recipient.StudentId, ct))
-            { recipient.Resolve(ObligationOutcome.Exempted, now); exempted++; }
-            else { recipient.Resolve(ObligationOutcome.Missed, now); missed++; }
+            var outcome = await ClassifyAsync(item, recipient, submissions, ct);
+            recipient.Resolve(outcome, now);
+            if (outcome == ObligationOutcome.Missed) missed++;
+            else if (outcome == ObligationOutcome.Exempted) exempted++;
         }
         item.MarkObligationsResolved(now);
         await store.SaveAsync(ct);
         return (missed, exempted);
+    }
+
+    // Quy tắc chốt dùng chung cho worker và đối soát: nộp trước hạn → Submitted; mất quyền lớp khi chốt → Exempted;
+    // còn lại → Missed. Enrollment chưa có lịch sử thời điểm thu hồi, nên trường hợp thu hồi giữa hạn nộp và lúc worker
+    // chạy cũng được miễn (thiên về không phạt sai).
+    private async Task<ObligationOutcome> ClassifyAsync(Assignment item, AssignmentRecipient recipient,
+        IReadOnlyDictionary<Guid, Submission> submissions, CancellationToken ct)
+    {
+        if (submissions.TryGetValue(recipient.StudentId, out var s) && s.SubmittedAt < item.ClosesAtUtc) return ObligationOutcome.Submitted;
+        return await enrollment.IsActiveAsync(item.ClassId, recipient.StudentId, ct) ? ObligationOutcome.Missed : ObligationOutcome.Exempted;
     }
 }

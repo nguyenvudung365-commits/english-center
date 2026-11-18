@@ -47,6 +47,7 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
     private readonly Dictionary<string, Guid> users = [];
     private Guid classId;
     private Guid otherClassId;
+    private Guid classSessionId, otherClassSessionId;
 
     public async Task InitializeAsync()
     {
@@ -84,6 +85,8 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
         enrollment.Classes.Add(new ClassSnapshot(item.Id, item.Code, item.StartDate, item.EndDate, item.MaxStudents, item.TuitionFee));
         enrollment.Classes.Add(new ClassSnapshot(other.Id, other.Code, other.StartDate, other.EndDate, other.MaxStudents, other.TuitionFee));
         await enrollment.SaveChangesAsync();
+        classSessionId = await CourseworkSessions.SeedAsync(factory.Services, classId, "Unit 3", "Lesson 2");
+        otherClassSessionId = await CourseworkSessions.SeedAsync(factory.Services, otherClassId);
     }
 
     public async Task DisposeAsync() { client.Dispose(); await factory.DisposeAsync(); }
@@ -126,7 +129,7 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
         var response = await client.PostAsJsonAsync("/api/academic/assignments", new
         {
             classId, title, description = "Mô tả", opensAtUtc = now.AddHours(-1), closesAtUtc = now.AddHours(closesInHours),
-            kind, unit = "Unit 3", lesson = "Lesson 2", publish
+            kind, unit = "Unit 3", lesson = "Lesson 2", publish, sessionId = classSessionId
         });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return await Json(response);
@@ -347,8 +350,11 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/academic/assignments/{id}", Body("Bài 1", closes, version, "Quiz"))).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await client.PutAsJsonAsync($"/api/academic/assignments/{id}", Body("Bài 1", closes.AddDays(1), version))).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await client.PutAsJsonAsync($"/api/academic/assignments/{id}", Body("Bài 1", closes, version - 1))).StatusCode);
-        // Chưa có module Session của TV1: không nhận SessionId thay vì lưu tham chiếu chưa kiểm chứng.
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PutAsJsonAsync($"/api/academic/assignments/{id}", Body("Bài 1", closes, version, sessionId: Guid.NewGuid()))).StatusCode);
+        // Buổi không tồn tại/khác lớp → 400; bài đã công bố không đổi sang buổi khác được → 409.
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/academic/assignments/{id}", Body("Bài 1", closes, version, sessionId: Guid.NewGuid()))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/academic/assignments/{id}", Body("Bài 1", closes, version, sessionId: otherClassSessionId))).StatusCode);
+        var anotherSession = await CourseworkSessions.SeedAsync(factory.Services, classId, "Unit 5", "Lesson 9");
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PutAsJsonAsync($"/api/academic/assignments/{id}", Body("Bài 1", closes, version, sessionId: anotherSession))).StatusCode);
         var ok = await client.PutAsJsonAsync($"/api/academic/assignments/{id}", Body("Bài 1 (đã sửa)", closes, version));
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
         var updated = await Json(ok);
@@ -631,6 +637,135 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
         Assert.Equal(count, recipients.Length);
         Assert.All(recipients, x => Assert.Equal(("Submitted", "Submitted"),
             (x.GetProperty("outcome").GetString(), x.GetProperty("submissionStatus").GetString())));
+    }
+
+    [Fact]
+    public async Task Publishing_RequiresASessionOfTheSameClass_AndDefaultsUnitAndLessonFromIt()
+    {
+        await As("teacher");
+        var now = DateTimeOffset.UtcNow;
+        const string path = "/api/academic/assignments";
+        object Body(Guid? sessionId, bool? publish = null, string? unit = null) => new
+        {
+            classId, title = "Gắn buổi", opensAtUtc = now.AddHours(-1), closesAtUtc = now.AddHours(2), unit, sessionId, publish
+        };
+        // AC-05: công bố ngay mà chưa gắn buổi → 409 và không lưu gì.
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync(path, Body(null))).StatusCode);
+        Assert.Empty((await client.GetFromJsonAsync<JsonElement[]>($"{path}?classId={classId}"))!);
+        // Buổi không tồn tại hoặc thuộc lớp khác → 400 kèm lỗi trường sessionId.
+        var missing = await client.PostAsJsonAsync(path, Body(Guid.NewGuid()));
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        Assert.True((await Json(missing)).GetProperty("errors").TryGetProperty("sessionId", out _));
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(path, Body(otherClassSessionId))).StatusCode);
+
+        // Buổi thật của lớp: Unit/Lesson bỏ trống lấy theo buổi, nhập tay thì giữ nguyên.
+        var created = await client.PostAsJsonAsync(path, Body(classSessionId));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var item = await Json(created);
+        Assert.Equal((classSessionId, "Unit 3", "Lesson 2", "Open"), (item.GetProperty("sessionId").GetGuid(),
+            item.GetProperty("unit").GetString(), item.GetProperty("lesson").GetString(), item.GetProperty("status").GetString()));
+        var custom = await Json(await client.PostAsJsonAsync(path, Body(classSessionId, unit: "Unit riêng")));
+        Assert.Equal(("Unit riêng", "Lesson 2"), (custom.GetProperty("unit").GetString(), custom.GetProperty("lesson").GetString()));
+
+        // Nháp chưa gắn buổi lưu được nhưng chưa công bố được; gắn buổi rồi mới công bố.
+        var draftResponse = await client.PostAsJsonAsync(path, Body(null, publish: false));
+        Assert.Equal(HttpStatusCode.Created, draftResponse.StatusCode);
+        var draft = await Json(draftResponse);
+        var draftId = draft.GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"{path}/{draftId}/publish", null)).StatusCode);
+        var attached = await client.PutAsJsonAsync($"{path}/{draftId}", new
+        {
+            title = "Gắn buổi", description = "", opensAtUtc = now.AddHours(-1), closesAtUtc = now.AddHours(2),
+            sessionId = classSessionId, expectedVersion = draft.GetProperty("version").GetInt32()
+        });
+        Assert.Equal(HttpStatusCode.OK, attached.StatusCode);
+        Assert.Equal(classSessionId, (await Json(attached)).GetProperty("sessionId").GetGuid());
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"{path}/{draftId}/publish", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task SubmissionAndRecipientLists_ShowStudentNamesFromIdentity()
+    {
+        await Enroll(); await Enroll("other-student");
+        var assignment = (await CreateAssignment("Có tên học viên")).GetProperty("id").GetGuid();
+        var submission = await Submit(assignment);
+        await As("teacher");
+        var listed = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>($"/api/academic/assignments/{assignment}/submissions"))!);
+        Assert.Equal((users["student"], "student"), (listed.GetProperty("studentId").GetGuid(), listed.GetProperty("studentName").GetString()));
+        // Kết quả chấm vẫn kèm tên để màn hình giáo viên không quay về hiện ID sau khi lưu điểm.
+        var graded = await Grade(submission, 8m, 0);
+        Assert.Equal(HttpStatusCode.OK, graded.StatusCode);
+        Assert.Equal("student", (await Json(graded)).GetProperty("studentName").GetString());
+        var recipients = (await client.GetFromJsonAsync<JsonElement[]>($"/api/academic/assignments/{assignment}/recipients"))!
+            .ToDictionary(x => x.GetProperty("studentId").GetGuid(), x => x.GetProperty("studentName").GetString());
+        Assert.Equal(("student", "other-student"), (recipients[users["student"]], recipients[users["other-student"]]));
+
+        // Học viên xem bài của chính mình: không trả tên.
+        await As("student");
+        var mine = await client.GetFromJsonAsync<JsonElement>($"/api/academic/assignments/{assignment}/submissions/mine");
+        Assert.Equal(JsonValueKind.Null, mine.GetProperty("studentName").ValueKind);
+
+        // Tài khoản bị khóa: Identity không trả tên nên frontend hiển thị ID thay thế.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            (await db.Users.SingleAsync(x => x.Id == users["student"])).SetLocked(true);
+            await db.SaveChangesAsync();
+        }
+        await As("teacher");
+        var locked = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>($"/api/academic/assignments/{assignment}/submissions"))!);
+        Assert.Equal(JsonValueKind.Null, locked.GetProperty("studentName").ValueKind);
+    }
+
+    [Fact]
+    public async Task MissedPreview_IsReadOnly_AndMatchesWhatTheWorkerLaterResolves()
+    {
+        await Enroll(); await Enroll("other-student");
+        var revoked = await Enroll("revoked-student");
+        var assignment = (await CreateAssignment("Đối soát trước khi bật cờ")).GetProperty("id").GetGuid();
+        var submission = await Submit(assignment);
+        await Revoke(revoked);
+        using (var scope = factory.Services.CreateScope())
+        {
+            // Đưa bài về quá khứ: đã quá hạn một giờ, bài nộp vẫn trước hạn.
+            var db = scope.ServiceProvider.GetRequiredService<AcademicDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var item = await db.Assignments.SingleAsync(x => x.Id == assignment);
+            db.Entry(item).Property(x => x.OpensAtUtc).CurrentValue = now.AddHours(-3);
+            db.Entry(item).Property(x => x.ClosesAtUtc).CurrentValue = now.AddHours(-1);
+            var work = await db.Submissions.SingleAsync(x => x.Id == submission);
+            db.Entry(work).Property(x => x.SubmittedAt).CurrentValue = now.AddHours(-2);
+            await db.SaveChangesAsync();
+        }
+
+        const string path = "/api/academic/assignments/missed-preview";
+        await As("teacher");
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(path)).StatusCode);
+        await As("staff");
+        var preview = await client.GetFromJsonAsync<JsonElement>(path);
+        var row = Assert.Single(preview.GetProperty("items").EnumerateArray(), x => x.GetProperty("assignmentId").GetGuid() == assignment);
+        Assert.Equal((3, 1, 1), (row.GetProperty("pending").GetInt32(), row.GetProperty("submitted").GetInt32(), row.GetProperty("exempted").GetInt32()));
+        var missed = Assert.Single(row.GetProperty("missed").EnumerateArray());
+        Assert.Equal((users["other-student"], "other-student"), (missed.GetProperty("studentId").GetGuid(), missed.GetProperty("studentName").GetString()));
+        Assert.False(preview.GetProperty("hasMore").GetBoolean());
+
+        // Chỉ đọc: chưa chốt, chưa phát AssignmentMissed.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AcademicDbContext>();
+            Assert.All(await db.AssignmentRecipients.AsNoTracking().Where(x => x.AssignmentId == assignment).ToListAsync(),
+                x => Assert.Equal(ObligationOutcome.Pending, x.Outcome));
+            Assert.Null((await db.Assignments.AsNoTracking().SingleAsync(x => x.Id == assignment)).ObligationsResolvedAt);
+        }
+        Assert.Empty(factory.Missed);
+
+        // Khi bật cờ, worker chốt đúng như bản đối soát; sau đó bài không còn trong danh sách chờ.
+        var result = await Reconcile(TimeSpan.Zero, resolve: true);
+        Assert.Equal((1, 1, 1), (result.AssignmentsResolved, result.Missed, result.Exempted));
+        Assert.Equal(users["other-student"], Assert.Single(factory.Missed).StudentId);
+        await As("staff");
+        var after = await client.GetFromJsonAsync<JsonElement>(path);
+        Assert.DoesNotContain(after.GetProperty("items").EnumerateArray(), x => x.GetProperty("assignmentId").GetGuid() == assignment);
     }
 
     [Fact]

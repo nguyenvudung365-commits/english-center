@@ -9,7 +9,9 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence;
 /// <summary>
 /// Chạy định kỳ <see cref="CourseworkReconciler"/>. Cấu hình:
 /// - Academic:Coursework:WorkerEnabled (mặc định true): phát lại event đã commit nhưng chưa gửi.
-/// - Academic:Coursework:ResolveMissed (mặc định false): chốt nghĩa vụ/missed sau hạn. Chỉ bật sau khi đã đối soát dữ liệu staging (Q-07).
+/// - Academic:Coursework:ResolveMissed (mặc định false): chốt nghĩa vụ/missed sau hạn và phát AssignmentMissed.
+///   Cờ nghiệp vụ: chỉ bật sau khi đã đối soát dữ liệu staging bằng GET /api/academic/assignments/missed-preview (Q-07).
+///   Khi triển khai bằng compose: đặt ACADEMIC_RESOLVE_MISSED=true trong file env deploy.
 /// - Academic:Coursework:IntervalSeconds (mặc định 60, 10–3600).
 /// Mỗi vòng dùng scope/DbContext mới; lỗi được log và thử lại ở vòng sau, không làm dừng host.
 /// </summary>
