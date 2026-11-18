@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ApiError, getSession, getSessionGeneration, identity } from "./api";
 import {
     canManageAcademic,
@@ -37,31 +37,20 @@ export function ManagerOnly({ children }: { children: ReactNode }) {
         );
     return children;
 }
-function AcademicLinks() {
+function ClassLinks() {
     const user = identity(getSession());
     const manager = user && canManageAcademic(user.role);
     return (
-        <div
-            className="academic-actions"
-            role="group"
-            aria-label="Chức năng Academic"
-        >
-            <Link className="secondary inline" to="/classes">
+        <nav className="academic-actions" aria-label="Điều hướng lớp học">
+            <NavLink end className={({ isActive }) => isActive ? "primary inline" : "secondary inline"} to="/classes">
                 Tra cứu lớp
-            </Link>
-            <Link className="secondary inline" to="/schedule">Lịch học</Link>
-            {manager && <>
-            <Link className="primary inline" to="/classes/new">
-                Tạo lớp học
-            </Link>
-            <Link className="secondary inline" to="/courses">
-                Khóa học
-            </Link>
-            <Link className="secondary inline" to="/teachers">
-                Giáo viên
-            </Link>
-            </>}
-        </div>
+            </NavLink>
+            {manager && (
+                <NavLink end className={({ isActive }) => isActive ? "primary inline" : "secondary inline"} to="/classes/new">
+                    Tạo lớp học
+                </NavLink>
+            )}
+        </nav>
     );
 }
 // Cleanup ignores obsolete reads; the generation check also covers logout while JSON is parsing.
@@ -114,7 +103,7 @@ export function Classes() {
                 title="Lớp học"
                 subtitle="Tra cứu lớp trong phạm vi tài khoản của bạn. Trạng thái được cập nhật theo ngày tại Việt Nam."
             />
-            <AcademicLinks />
+            <ClassLinks />
             <section className="panel">
                 <h2>Danh sách lớp học</h2>
                 <form
@@ -183,7 +172,7 @@ export function ClassDetails({ feed }: { feed?: (classId: string) => ReactNode }
                 title="Chi tiết lớp học"
                 subtitle="Dữ liệu và trạng thái do máy chủ Academic cung cấp."
             />
-            <AcademicLinks />
+            <ClassLinks />
             {success && (
                 <p className="notice" role="status">
                     Đã tạo lớp thành công.{" "}
@@ -360,7 +349,7 @@ export function ClassCreate() {
                 title="Tạo lớp học"
                 subtitle="Tạo lớp từ danh mục khóa học và giáo viên thực tế. Các trường đều bắt buộc."
             />
-            <AcademicLinks />
+            <ClassLinks />
             <div className="catalog-status" aria-live="polite">
                 {courses.loading && <p role="status">Đang tải khóa học…</p>}
                 {teachers.loading && <p role="status">Đang tải giáo viên…</p>}
@@ -622,7 +611,6 @@ export function Catalog({ kind }: { kind: "courses" | "teachers" }) {
                 title={courses ? "Danh mục khóa học" : "Danh mục giáo viên"}
                 subtitle="Danh mục chỉ đọc từ Academic. Tìm kiếm trên dữ liệu đã tải; chưa có API thêm, sửa hoặc xóa."
             />
-            <AcademicLinks />
             <section className="panel">
                 <label htmlFor="catalog-search">
                     {courses
