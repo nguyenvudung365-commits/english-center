@@ -3,7 +3,7 @@ import { setSession, type Session } from "./api";
 import {
     assignmentKindLabel, assignmentStatusLabel, canGrade, canManageCoursework, createAssignment, createPractice, deletePractice,
     emptyAssignmentDraft, formatScore, gradeSubmission, isAssignmentLocked, isGraded, listClassAssignments, listGradeHistory,
-    listMyAssignments, listPractice, parseScore, publishAssignment, scoreInput, studentScoreText, submissionStatusLabel,
+    listMyAssignments, listPractice, parseScore, publishAssignment, scoreInput, studentLabel, studentScoreText, submissionStatusLabel,
     updateAssignment, updatePractice, validateAssignmentDraft, validateGradeDraft, validatePracticeDraft,
     type AssignmentDraft, type Practice,
 } from "./coursework";
@@ -116,6 +116,17 @@ describe("form bài tập và luyện tập", () => {
         expect(validateAssignmentDraft(draft({ closesLocal: "2026-02-30T10:00" }))).toHaveProperty("closesLocal");
         expect(validateAssignmentDraft(draft({ closesLocal: "2026-11-17T08:00" }))).toHaveProperty("closesLocal");
         expect(validateAssignmentDraft(draft({ closesLocal: "2026-11-17T07:00" }))).toHaveProperty("closesLocal");
+    });
+    it("công bố ngay bắt buộc chọn buổi học; lưu nháp hoặc sửa bài thì không", () => {
+        expect(validateAssignmentDraft(draft(), false, true)).toHaveProperty("sessionId");
+        expect(validateAssignmentDraft(draft({ sessionId: "55555555-5555-5555-5555-555555555555" }), false, true)).toEqual({});
+        expect(validateAssignmentDraft(draft(), false, false)).toEqual({});
+    });
+    it("tên học viên kèm mã; thiếu tên thì để giao diện hiện ID", () => {
+        expect(studentLabel({ studentName: "Nguyễn Văn A", studentCode: "HV0001" })).toBe("Nguyễn Văn A (HV0001)");
+        expect(studentLabel({ studentName: "Nguyễn Văn A", studentCode: null })).toBe("Nguyễn Văn A");
+        expect(studentLabel({ studentName: "  ", studentCode: "HV0001" })).toBeNull();
+        expect(studentLabel({})).toBeNull();
     });
     it("bài đã công bố không kiểm tra loại/thời gian nhưng vẫn kiểm tra tiêu đề", () => {
         expect(validateAssignmentDraft(draft({ opensLocal: "", closesLocal: "", kind: "" }), true)).toEqual({});

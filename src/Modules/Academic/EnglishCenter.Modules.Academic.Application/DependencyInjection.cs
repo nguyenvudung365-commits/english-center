@@ -6,7 +6,6 @@ using EnglishCenter.Modules.Academic.Application.IntegrationEventHandlers;
 using EnglishCenter.Modules.Academic.Application.Practice;
 using EnglishCenter.Modules.Identity.Contracts.IntegrationEvents;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents;
 
 namespace EnglishCenter.Modules.Academic.Application;
@@ -31,8 +30,8 @@ public static class DependencyInjection
         services.AddScoped<CourseworkDirectory>();
         services.AddScoped<EnglishCenter.Modules.Academic.Contracts.IAssignmentDirectory>(sp => sp.GetRequiredService<CourseworkDirectory>());
         services.AddScoped<EnglishCenter.Modules.Academic.Contracts.ICourseworkMetrics>(sp => sp.GetRequiredService<CourseworkDirectory>());
-        // TV1 thay bằng bản triển khai Session thật (IsAvailable = true) khi US-08 được merge.
-        services.TryAddScoped<ISessionCatalog, UnavailableSessionCatalog>();
+        // Bài tập gắn với buổi học thật của TV1 (US-08): bắt buộc gán buổi cùng lớp trước khi công bố (AC-05).
+        services.AddScoped<ISessionCatalog, Sessions.SessionCatalog>();
         services.AddScoped<StudentClasses>();
         services.AddIntegrationEventHandler<StudentEnrolledIntegrationEvent, StudentEnrolledHandler>();
         services.AddIntegrationEventHandler<UserRegisteredIntegrationEvent, UserRegisteredIntegrationEventHandler>();

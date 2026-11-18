@@ -125,10 +125,12 @@ public sealed partial class Tv3Week3Tests : IAsyncLifetime
     {
         await Login("Teacher");
         var now = DateTimeOffset.UtcNow;
+        // AC-05 (TV2): bài phải gắn buổi học của lớp trước khi công bố.
+        var session = await CourseworkSessions.SeedAsync(_factory.Services, _class);
         var created = await _client.PostAsJsonAsync("/api/academic/assignments", new
         {
             classId = _class, title = "Registration-backed access",
-            opensAtUtc = now.AddHours(-1), closesAtUtc = now.AddHours(1)
+            opensAtUtc = now.AddHours(-1), closesAtUtc = now.AddHours(1), sessionId = session
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var assignment = (await created.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("id").GetGuid();

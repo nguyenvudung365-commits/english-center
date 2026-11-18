@@ -8,11 +8,11 @@ import {
     assignmentKindLabel, assignmentKinds, assignmentKindLabels, assignmentStatuses, assignmentStatusLabel, assignmentStatusLabels,
     ASSIGNMENT_DESCRIPTION_MAX, ASSIGNMENT_LABEL_MAX, ASSIGNMENT_TITLE_MAX, canGrade, createAssignment, emptyAssignmentDraft, FEEDBACK_MAX,
     formatScore, gradeSubmission, isAssignmentLocked, isGraded, listClassAssignments, listGradeHistory, listMyAssignments, publishAssignment,
-    scoreInput, studentScoreText, submissionStatuses, submissionStatusLabel, submissionStatusLabels, updateAssignment, validateAssignmentDraft,
+    scoreInput, studentLabel, studentScoreText, submissionStatuses, submissionStatusLabel, submissionStatusLabels, updateAssignment, validateAssignmentDraft,
     validateGradeDraft, type AssignmentDraft, type GradeDraft,
 } from "./coursework";
 import { formatVnDateTime, utcToVnLocal } from "./format";
-import { listSessions } from "./schedule";
+import { getScheduledSession, listSessions } from "./schedule";
 import { ErrorMessage, FieldError, fieldProps, PageHeading, Pager } from "./ui";
 import { submissionAccept, submitAssignment, validateSubmissionFiles, type Assignment, type Submission, type UploadStatus } from "./submissions";
 
@@ -184,20 +184,31 @@ function ManagerAssignments() {
     </>;
 }
 
-function SessionSelect({ id, classId, value, disabled, onChange }: { id: string; classId: string; value: string; disabled: boolean; onChange: (value: string) => void }) {
+function SessionSelect({ id, classId, value, disabled, errors, onChange }: { id: string; classId: string; value: string; disabled: boolean; errors?: string[]; onChange: (value: string) => void }) {
     const [range] = useState(() => { const now = Date.now(); return { fromUtc: new Date(now - 30 * 86400000).toISOString(), toUtc: new Date(now + 60 * 86400000).toISOString() }; });
     const load = useCallback(() => listSessions({ classId, ...range }), [classId, range]);
     const sessions = useLoad(load);
+    const field = fieldProps(id, errors);
     return <div className="academic-field">
-        <label htmlFor={id}>Buổi học (tùy chọn)</label>
-        <select id={id} value={value} disabled={disabled || sessions.loading} aria-describedby={`${id}-help`} onChange={event => onChange(event.target.value)}>
-            <option value="">Không gắn buổi</option>
+        <label htmlFor={id}>Buổi học (bắt buộc trước khi công bố)</label>
+        <select {...field} value={value} disabled={disabled || sessions.loading} aria-describedby={[field["aria-describedby"], `${id}-help`].filter(Boolean).join(" ")} onChange={event => onChange(event.target.value)}>
+            <option value="">Chưa chọn buổi</option>
             {value && !sessions.data?.some(item => item.id === value) && <option value={value}>Buổi đang gắn</option>}
-            {sessions.data?.map(item => <option key={item.id} value={item.id}>{item.lesson} · {formatVnDateTime(item.startsAtUtc)}</option>)}
+            {sessions.data?.map(item => <option key={item.id} value={item.id}>{[item.unit, item.lesson].filter(Boolean).join(" · ")} · {formatVnDateTime(item.startsAtUtc)}</option>)}
         </select>
-        <p id={`${id}-help`} className="small muted">Liệt kê buổi từ 30 ngày trước đến 60 ngày tới. Máy chủ chỉ nhận buổi khi tính năng gắn buổi đã bật; nếu chưa, hãy để trống.</p>
+        <FieldError id={id} errors={errors} />
+        <p id={`${id}-help`} className="small muted">Liệt kê buổi của lớp từ 30 ngày trước đến 60 ngày tới. Unit/Lesson để trống sẽ lấy theo buổi đã chọn. Lưu nháp thì có thể chọn buổi sau.</p>
+        {sessions.data?.length === 0 && <p className="small muted">Lớp chưa có buổi học trong khoảng này. Hãy tạo buổi ở trang Lịch học trước khi công bố bài.</p>}
         <ReadFeedback result={sessions} />
     </div>;
+}
+
+// Hiển thị buổi đã gắn theo Unit/Lesson và giờ học; không tải được (ví dụ không có quyền xem lịch) thì hiện mã buổi.
+function SessionLabel({ id }: { id: string }) {
+    const load = useCallback(() => getScheduledSession(id), [id]);
+    const session = useLoad(load);
+    if (!session.data) return <code>{id}</code>;
+    return <>{[session.data.unit, session.data.lesson].filter(Boolean).join(" · ")} · {formatVnDateTime(session.data.startsAtUtc)} (UTC+7)</>;
 }
 
 function AssignmentForm({ id, classId, initial, locked, create, busy, children, submitLabel, onSubmit, onCancel }: {
@@ -206,7 +217,7 @@ function AssignmentForm({ id, classId, initial, locked, create, busy, children, 
 }) {
     const [draft, setDraft] = useState(initial);
     const [attempted, setAttempted] = useState(false);
-    const errors = validateAssignmentDraft(draft, locked);
+    const errors = validateAssignmentDraft(draft, locked, create && !draft.saveAsDraft);
     const shown = attempted ? errors : {};
     const set = (patch: Partial<AssignmentDraft>) => setDraft({ ...draft, ...patch });
     return <form className="academic-form" noValidate aria-busy={busy} onSubmit={event => {
@@ -251,7 +262,7 @@ function AssignmentForm({ id, classId, initial, locked, create, busy, children, 
             <input {...fieldProps(`${id}-closes`, shown.closesLocal)} type="datetime-local" required disabled={busy || locked} value={draft.closesLocal} onChange={event => set({ closesLocal: event.target.value })} />
             <FieldError id={`${id}-closes`} errors={shown.closesLocal} />
         </div>
-        <SessionSelect id={`${id}-session`} classId={classId} value={draft.sessionId} disabled={busy || locked} onChange={value => set({ sessionId: value })} />
+        <SessionSelect id={`${id}-session`} classId={classId} value={draft.sessionId} disabled={busy || locked} errors={shown.sessionId} onChange={value => set({ sessionId: value })} />
         {create && <label className="check-row" htmlFor={`${id}-draft`}>
             <input id={`${id}-draft`} type="checkbox" disabled={busy} checked={draft.saveAsDraft} onChange={event => set({ saveAsDraft: event.target.checked })} />
             Lưu nháp, công bố sau (học viên chưa thấy)
@@ -298,7 +309,7 @@ export function AssignmentDetails() {
                 <p className="assignment-description">{current.description || "Không có hướng dẫn bổ sung."}</p>
                 <dl className="academic-detail">
                     <dt>Unit / Lesson</dt><dd>{[current.unit, current.lesson].filter(Boolean).join(" · ") || "Chưa nhập"}</dd>
-                    <dt>Buổi học</dt><dd>{current.sessionId ? <code>{current.sessionId}</code> : "Chưa gắn buổi"}</dd>
+                    <dt>Buổi học</dt><dd>{current.sessionId ? <SessionLabel id={current.sessionId} /> : "Chưa gắn buổi"}</dd>
                     <dt>Mở nhận bài</dt><dd>{formatVnDateTime(current.opensAtUtc)} (UTC+7)</dd>
                     <dt>Đóng nhận bài</dt><dd>{formatVnDateTime(current.closesAtUtc)} (UTC+7)</dd>
                     <dt>Công bố lúc</dt><dd>{current.publishedAt ? `${formatVnDateTime(current.publishedAt)} (UTC+7)` : current.isLegacy ? "Bài cũ, hiển thị sẵn" : "Chưa công bố"}</dd>
@@ -319,7 +330,8 @@ function AssignmentManage({ item, onChanged, onReload }: { item: Assignment; onC
     return <section className="panel"><h2>Quản lý bài tập</h2>
         {item.status === "Draft" && <>
             <p>Bài đang là nháp: học viên chưa thấy. Công bố sẽ chốt danh sách học viên hiện có quyền lớp và gửi thông báo.</p>
-            <button type="button" className="primary" disabled={busy} onClick={() => { setNotice(""); void publish.run(() => publishAssignment(item), value => { onChanged(value); setNotice("Đã công bố bài tập."); }); }}>
+            {!item.sessionId && <p className="notice" role="status">Bài chưa gắn buổi học. Chọn “Sửa bài tập” để gắn buổi của lớp rồi mới công bố được.</p>}
+            <button type="button" className="primary" disabled={busy || !item.sessionId} onClick={() => { setNotice(""); void publish.run(() => publishAssignment(item), value => { onChanged(value); setNotice("Đã công bố bài tập."); }); }}>
                 {publish.busy ? "Đang công bố…" : "Công bố bài tập"}
             </button>
             <Conflict error={publish.error} text="Không công bố được: bài đã thay đổi hoặc chưa đủ điều kiện (ví dụ cần gắn buổi học trước khi công bố)." onReload={onReload} />
@@ -426,7 +438,8 @@ function SubmissionReview({ assignmentId, role }: { assignmentId: string; role: 
 function ReviewItem({ submission, role, onSaved, onReload }: { submission: Submission; role: import("./api").Role; onSaved: (value: Submission) => void; onReload: () => void }) {
     const [notice, setNotice] = useState("");
     const graded = isGraded(submission);
-    return <article className="submission-review"><h3>Học viên <code>{submission.studentId}</code></h3>
+    const name = studentLabel(submission);
+    return <article className="submission-review"><h3>{name ? <>Học viên {name}</> : <>Học viên <code>{submission.studentId}</code></>}</h3>
         <SubmissionAttachments key={`${submission.id}:${submission.revision}`} submission={submission} />
         <p>Điểm hiện tại: <strong>{formatScore(submission.score)}</strong>{graded && <> / 10 · phiên bản {submission.gradeVersion}{submission.gradedAt && <> · Chấm lúc {formatVnDateTime(submission.gradedAt)} (UTC+7)</>}</>}</p>
         {graded && submission.feedback && <p className="assignment-description">Nhận xét: {submission.feedback}</p>}

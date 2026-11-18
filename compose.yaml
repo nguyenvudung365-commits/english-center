@@ -12,6 +12,8 @@ services:
       Jwt__SigningKey: ${JWT_SIGNING_KEY:?Phai cau hinh JWT_SIGNING_KEY}
       Identity__InitializeDatabase: 'true'
       Academic__InitializeDatabase: 'true'
+      # Cờ nghiệp vụ: chỉ đặt true sau khi đối soát dữ liệu bằng GET /api/academic/assignments/missed-preview.
+      Academic__Coursework__ResolveMissed: ${ACADEMIC_RESOLVE_MISSED:-false}
       Enrollment__InitializeDatabase: 'true'
       Finance__InitializeDatabase: 'true'
       MediaNotification__InitializeDatabase: 'true'
