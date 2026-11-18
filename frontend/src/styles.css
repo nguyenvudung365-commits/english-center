@@ -275,12 +275,12 @@ form {
     margin: 45px 16px 14px;
     font-weight: 600;
 }
-nav {
+.sidebar nav {
     display: flex;
     flex-direction: column;
     gap: 5px;
 }
-nav a {
+.sidebar nav a {
     display: flex;
     align-items: center;
     gap: 13px;
@@ -289,10 +289,10 @@ nav a {
     color: #475569;
     font-size: 0.9rem;
 }
-nav a:hover {
+.sidebar nav a:hover {
     background: #f8fafc;
 }
-nav a.active {
+.sidebar nav a.active {
     background: #eaf4fa;
     color: #075985;
     font-weight: 600;
@@ -718,9 +718,6 @@ dd {
 }
 .sidebar nav a > svg {
     flex-shrink: 0;
-}
-.sidebar nav .nav-child {
-    padding-left: 30px;
 }
 .nav-status {
     flex-basis: 100%;

@@ -385,7 +385,6 @@ function navigation(role: import("./api").Role) {
     const operational = [
         ...(manager
             ? [
-                  { to: "/classes/new", label: "Tạo lớp học", icon: BookOpen },
                   { to: "/courses", label: "Khóa học", icon: BookOpen },
                   { to: "/teachers", label: "Giáo viên", icon: UserRound },
                   { to: "/users/new", label: "Tạo tài khoản", icon: ShieldCheck },
@@ -637,14 +636,6 @@ function App() {
                     {links.map((link) => (
                         <NavLink
                             end={link.to === "/" || link.to === "/faq"}
-                            className={
-                                link.to === "/classes/new"
-                                    ? ({ isActive }) =>
-                                          isActive
-                                              ? "active nav-child"
-                                              : "nav-child"
-                                    : undefined
-                            }
                             key={link.to}
                             to={link.to}
                         >
