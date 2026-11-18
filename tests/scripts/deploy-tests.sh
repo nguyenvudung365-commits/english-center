@@ -48,6 +48,15 @@ else
   [[ "$1 $2 $3 $4" == '-f compose.yaml -f compose.web.yaml' ]]
 fi
 shift 4
+if [[ $* == 'config --format json' ]]; then
+  echo 'base config --format json' >>"$CALLS"
+  case $SCENARIO in
+    missing-api) echo '{"services":{"web":{},"postgres":{}}}' ;;
+    missing-web) echo '{"services":{"api":{},"postgres":{}}}' ;;
+    *) echo '{"services":{"api":{},"web":{},"postgres":{}}}' ;;
+  esac
+  exit 0
+fi
 [[ $1 == -f && $2 == */compose.release.yaml ]]
 shift 2
 echo "$*" >>"$CALLS"
@@ -84,8 +93,15 @@ run_case() {
   exit 1
 }
 
+for scenario in missing-api missing-web; do
+  run_case "$scenario" fail
+  diff -u <(echo 'base config --format json') "$CALLS"
+done
+ENGLISH_CENTER_API_IMAGE="${ENGLISH_CENTER_API_IMAGE/ghcr.io/ghcrXio}" run_case wrong-registry fail
+[[ ! -s $CALLS ]]
 run_case ok pass
 cat >"$work/expected" <<'EXPECTED'
+base config --format json
 config --format json
 ps --status running --quiet postgres
 up -d --no-deps --no-build --pull never --wait --wait-timeout 180 api
@@ -105,9 +121,9 @@ done
 if grep -q 'test-secret-value' "$work/output"; then echo 'Compose leaked a secret.' >&2; exit 1; fi
 grep -q 'Compose không hợp lệ' "$work/output"
 run_case api-fails fail
-{ head -n 3 "$work/expected"; echo 'exec -T web nginx -s reload'; } | diff -u - "$CALLS"
+{ head -n 4 "$work/expected"; echo 'exec -T web nginx -s reload'; } | diff -u - "$CALLS"
 run_case web-fails fail
-head -n 4 "$work/expected" | diff -u - "$CALLS"
+head -n 5 "$work/expected" | diff -u - "$CALLS"
 run_case proxy-fails fail
 diff -u "$work/expected" "$CALLS"
 echo 'PASS: deploy chạy đúng commit, giữ PostgreSQL và báo lỗi API/proxy.'

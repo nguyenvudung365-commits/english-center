@@ -4,8 +4,8 @@ set -euo pipefail
 [[ ${IMAGE_TAG:-} =~ ^[a-f0-9]{40}$ ]] || { echo 'Thiếu IMAGE_TAG là SHA đầy đủ.' >&2; exit 1; }
 [[ -n ${DEPLOY_ENV:-} && -r $DEPLOY_ENV ]] || { echo 'Không đọc được credential file deploy.' >&2; exit 1; }
 package='ghcr.io/nguyenvudung365-commits/english-center'
-if [[ ! ${ENGLISH_CENTER_API_IMAGE:-} =~ ^${package//./\.}-api@sha256:[a-f0-9]{64}$ ||
-      ! ${ENGLISH_CENTER_WEB_IMAGE:-} =~ ^${package//./\.}-web@sha256:[a-f0-9]{64}$ ]]; then
+if [[ ! ${ENGLISH_CENTER_API_IMAGE:-} =~ ^"$package"-api@sha256:[a-f0-9]{64}$ ||
+      ! ${ENGLISH_CENTER_WEB_IMAGE:-} =~ ^"$package"-web@sha256:[a-f0-9]{64}$ ]]; then
   echo 'Thiếu cặp digest GHCR API/web đã xác minh.' >&2; exit 1
 fi
 
@@ -23,12 +23,17 @@ elif [[ -n ${ENGLISH_CENTER_VPS_COMPOSE_FILES:-} ]]; then
 else
   echo 'Cần cấu hình ENGLISH_CENTER_VPS_COMPOSE_FILES theo stack VPS hiện tại.' >&2; exit 1
 fi
-compose+=(-f "$PWD/compose.release.yaml")
-
 run_compose() {
   # Compose có thể ghi nội dung dòng lỗi của secret file lên stderr.
   COMPOSE_REMOVE_ORPHANS=false "${compose[@]}" "$@" 2>/dev/null
 }
+
+# Overlay chỉ đổi image, không được tự tạo service thiếu cấu hình VPS.
+if ! run_compose config --format json |
+  jq -e '.services | has("api") and has("web")' >/dev/null 2>&1; then
+  echo 'Compose gốc không hợp lệ hoặc thiếu service API/web.' >&2; exit 1
+fi
+compose+=(-f "$PWD/compose.release.yaml")
 
 if ! run_compose config --format json | jq -e --arg api "$ENGLISH_CENTER_API_IMAGE" --arg web "$ENGLISH_CENTER_WEB_IMAGE" '
   def health_enabled: .healthcheck.disable != true and .healthcheck.test[0] != "NONE";
