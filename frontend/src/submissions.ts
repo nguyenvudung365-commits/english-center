@@ -3,10 +3,13 @@ import { api, ApiError, getSessionGeneration } from "./api";
 export type Assignment = {
     id: string; classId: string; title: string; description: string;
     opensAtUtc: string; closesAtUtc: string;
+    kind: string; unit: string | null; lesson: string | null; sessionId: string | null; isLegacy: boolean;
+    status: string; publishedAt: string | null; createdAt: string | null; version: number;
 };
 export type Submission = {
     id: string; assignmentId: string; studentId: string; revision: string; submittedAt: string;
     files: { fileId: string; fileName: string; contentType: string; sizeBytes: number }[];
+    score: number | null; feedback: string | null; gradeVersion: number; gradedAt: string | null; gradedBy: string | null;
 };
 export type UploadStatus = "uploading" | "confirming" | "confirmed";
 const types: Record<string, string> = {
