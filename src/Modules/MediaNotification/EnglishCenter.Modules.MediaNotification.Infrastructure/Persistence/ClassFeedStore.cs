@@ -23,6 +23,10 @@ internal sealed class ClassFeedStore(MediaNotificationDbContext db) : IClassFeed
     public Task<PostComment?> FindCommentAsync(Guid id, CancellationToken ct) => db.Comments.SingleOrDefaultAsync(x => x.Id == id, ct);
     public Task SaveAsync(CancellationToken ct) => db.SaveChangesAsync(ct);
 
+    public async Task<int> CountByAuthorSinceAsync(Guid author, DateTime since, CancellationToken ct) =>
+        await db.Posts.CountAsync(x => x.AuthorId == author && x.CreatedAt > since, ct)
+        + await db.Comments.CountAsync(x => x.AuthorId == author && x.CreatedAt > since, ct);
+
     public async Task<PagedResult<PostView>> PostsAsync(Guid classId, bool includeHidden, Guid viewer, int page, int size, CancellationToken ct)
     {
         var states = States(includeHidden);

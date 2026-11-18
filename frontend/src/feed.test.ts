@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setSession, type Session } from "./api";
 import {
-    canModerateFeed, COMMENT_MAX, createComment, createPost, feedAccessMessage, hidePost, isFeedAuthor, POST_MAX, roleLabel, setLike,
+    authorLabel, canModerateFeed, COMMENT_MAX, createComment, createPost, feedAccessMessage, hidePost, isFeedAuthor, POST_MAX, roleLabel, setLike,
     validateFeedContent,
 } from "./feed";
 
@@ -32,6 +32,12 @@ describe("Bảng tin lớp", () => {
         expect(feedAccessMessage(403)).toContain("không có quyền");
         expect(feedAccessMessage(404)).toContain("không còn tồn tại");
         expect(feedAccessMessage(500)).toBeNull();
+    });
+    it("hiển thị tên tác giả kèm vai trò, không có tên thì chỉ hiện vai trò", () => {
+        expect(authorLabel("  Nguyễn An ", "Student")).toBe("Nguyễn An (Học viên)");
+        expect(authorLabel(null, "Teacher")).toBe("Giáo viên");
+        expect(authorLabel("   ", "Teacher")).toBe("Giáo viên");
+        expect(authorLabel(undefined, "Student")).toBe("Học viên");
     });
     it("gọi đúng API bảng tin", async () => {
         setSession(session);

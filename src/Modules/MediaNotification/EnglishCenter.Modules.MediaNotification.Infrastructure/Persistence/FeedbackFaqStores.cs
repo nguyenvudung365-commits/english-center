@@ -16,6 +16,8 @@ internal sealed class FeedbackStore(MediaNotificationDbContext db) : IFeedbackSt
     }
 
     public Task<StudentFeedback?> FindAsync(Guid id, CancellationToken ct) => db.Feedbacks.SingleOrDefaultAsync(x => x.Id == id, ct);
+    public Task<int> CountSinceAsync(Guid student, DateTime since, CancellationToken ct) =>
+        db.Feedbacks.CountAsync(x => x.StudentId == student && x.CreatedAt > since, ct);
 
     public async Task<bool> TrySaveAsync(CancellationToken ct)
     {

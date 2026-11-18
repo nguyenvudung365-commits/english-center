@@ -3,11 +3,11 @@ import type { Page } from "./attendance";
 import { validatePlainText } from "./feedback";
 
 export type Post = {
-    id: string; classId: string; authorId: string; authorRole: string; content: string; createdAtUtc: string;
+    id: string; classId: string; authorId: string; authorRole: string; authorName: string | null; content: string; createdAtUtc: string;
     updatedAtUtc: string | null; isHidden: boolean; likeCount: number; likedByMe: boolean; commentCount: number;
 };
 export type PostComment = {
-    id: string; postId: string; authorId: string; authorRole: string; content: string; createdAtUtc: string;
+    id: string; postId: string; authorId: string; authorRole: string; authorName: string | null; content: string; createdAtUtc: string;
     updatedAtUtc: string | null; isHidden: boolean;
 };
 export const POST_MAX = 4000;
@@ -16,6 +16,8 @@ export const COMMENT_MAX = 1000;
 export const validateFeedContent = (value: string, max: number) => validatePlainText(value, max, "Nội dung", true);
 export const roleLabel = (role: string) =>
     ({ Admin: "Quản trị viên", Staff: "Giáo vụ", Teacher: "Giáo viên", Student: "Học viên" } as Record<string, string>)[role] ?? role;
+export const authorLabel = (name: string | null | undefined, role: string) =>
+    name?.trim() ? `${name.trim()} (${roleLabel(role)})` : roleLabel(role);
 // Máy chủ vẫn là nơi quyết định quyền; đây chỉ quyết định nút nào được hiện.
 export const isFeedAuthor = (userId: string, authorId: string) => userId.toLowerCase() === authorId.toLowerCase();
 export const canModerateFeed = (role: Role) => role === "Teacher" || role === "Staff" || role === "Admin";

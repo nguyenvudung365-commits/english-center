@@ -863,9 +863,136 @@ public sealed class Tv4NotificationFeedbackTests : IAsyncLifetime
         }
     }
 
+    // ---------- tên tác giả bảng tin ----------
+
+    [Fact]
+    public async Task Feed_ShowsAuthorNames_ForPostsAndComments_WithoutLeakingEmail_AndNullWhenUnknown()
+    {
+        await EnrollMembers();
+        var post = await Post("student");
+        await As("classmate");
+        await Expect(HttpStatusCode.Created, HttpMethod.Post, $"{Api}/posts/{post}/comments", new { content = "hi" });
+        await As("teacher");
+        var created = await Json(await Expect(HttpStatusCode.Created, HttpMethod.Post, $"{Api}/posts/{post}/comments", new { content = "ok" }));
+        Assert.Equal("teacher", created.GetProperty("authorName").GetString());
+        await Db(async db =>
+        {
+            db.Posts.Add(ClassPost.Create(classId, Guid.NewGuid(), Roles.Student, "Tác giả không còn", DateTime.UtcNow.AddMinutes(1)));
+            await db.SaveChangesAsync();
+            return 0;
+        });
+
+        var posts = await Posts("student");
+        var names = Items(posts).ToDictionary(x => x.GetProperty("id").GetGuid(), x => x.GetProperty("authorName").GetString());
+        Assert.Equal("student", names[post]);
+        Assert.Single(names.Values, x => x is null);
+        var comments = await Get($"{Api}/posts/{post}/comments");
+        Assert.Equal(new[] { "classmate", "teacher" }, Items(comments).Select(x => x.GetProperty("authorName").GetString()!).Order().ToArray());
+        foreach (var raw in new[] { JsonSerializer.Serialize(Items(posts)), JsonSerializer.Serialize(Items(comments)), created.ToString() })
+        {
+            Assert.DoesNotContain("@example.test", raw);
+            Assert.DoesNotContain("email", raw, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    // ---------- thông báo điểm danh và bài bỏ ----------
+
+    [Fact]
+    public async Task AttendanceAndMissedAssignment_NotifyOnlyTheStudent_ReplayDoesNotDuplicate_AndCarryNoStatus()
+    {
+        await Enroll("student");
+        var (attendance, session, assignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var student = users["student"];
+        var first = new AttendanceRevisionRecordedIntegrationEvent(attendance, session, classId, student, "AbsentUnexcused", 1, users["teacher"], DateTime.UtcNow);
+        await Publish(first);
+        await Publish(first with { EventId = Guid.NewGuid() });
+        await Publish(first with { Revision = 2, Status = "Present" });
+        var missed = new AssignmentMissedIntegrationEvent(assignment, classId, student);
+        await Publish(missed);
+        await Publish(missed with { EventId = Guid.NewGuid() });
+
+        await As("student");
+        var items = Items(await Inbox()).Where(x => x.GetProperty("kind").GetString() != "StudentEnrolled").ToList();
+        Assert.Equal(new[] { "AssignmentMissed", "AttendanceRecorded", "AttendanceRecorded" }, items.Select(x => x.GetProperty("kind").GetString()!).Order().ToArray());
+        Assert.All(items.Where(x => x.GetProperty("kind").GetString() == "AttendanceRecorded"), x =>
+        {
+            Assert.Equal("Session", x.GetProperty("targetType").GetString());
+            Assert.Equal(session, x.GetProperty("targetId").GetGuid());
+        });
+        var due = items.Single(x => x.GetProperty("kind").GetString() == "AssignmentMissed");
+        Assert.Equal("Assignment", due.GetProperty("targetType").GetString());
+        Assert.Equal(assignment, due.GetProperty("targetId").GetGuid());
+        var raw = JsonSerializer.Serialize(items);
+        foreach (var forbidden in new[] { "Absent", "Present", "Unexcused" })
+            Assert.DoesNotContain(forbidden, raw, StringComparison.OrdinalIgnoreCase);
+        foreach (var name in new[] { "classmate", "teacher", "staff" })
+        {
+            await As(name);
+            Assert.Equal(0, (await Inbox()).GetProperty("total").GetInt32());
+        }
+    }
+
+    // ---------- giới hạn tần suất ----------
+
+    private async Task AssertTooManyRequests(HttpMethod method, string url, object body)
+    {
+        var response = await Send(method, url, body);
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public async Task Feedback_IsLimitedToFivePerHourPerStudent_AndAllowedAgainAfterAnHour()
+    {
+        await As("student");
+        for (var i = 0; i < 5; i++) await Expect(HttpStatusCode.Created, HttpMethod.Post, $"{Api}/feedback", Feedback());
+        // Dữ liệu sai bị từ chối 400 trước và không tính vào giới hạn.
+        Assert.Equal(HttpStatusCode.BadRequest, (await Send(HttpMethod.Post, $"{Api}/feedback", Feedback(title: ""))).StatusCode);
+        await AssertTooManyRequests(HttpMethod.Post, $"{Api}/feedback", Feedback());
+        Assert.Equal(5, await Db(db => db.Feedbacks.CountAsync()));
+
+        await As("classmate");
+        await Expect(HttpStatusCode.Created, HttpMethod.Post, $"{Api}/feedback", Feedback());
+
+        factory.Clock.Shift = TimeSpan.FromMinutes(61);
+        await As("student");
+        await Expect(HttpStatusCode.Created, HttpMethod.Post, $"{Api}/feedback", Feedback());
+    }
+
+    [Fact]
+    public async Task FeedPostsAndComments_AreLimitedTo30PerHourPerUser_AndAllowedAgainAfterAnHour()
+    {
+        await EnrollMembers();
+        var post = await Post("classmate");
+        await As("student");
+        for (var i = 0; i < 20; i++) await Expect(HttpStatusCode.Created, HttpMethod.Post, $"{Api}/classes/{classId}/posts", new { content = $"Bài {i}" });
+        for (var i = 0; i < 10; i++) await Expect(HttpStatusCode.Created, HttpMethod.Post, $"{Api}/posts/{post}/comments", new { content = $"Bình luận {i}" });
+        await AssertTooManyRequests(HttpMethod.Post, $"{Api}/classes/{classId}/posts", new { content = "thừa" });
+        await AssertTooManyRequests(HttpMethod.Post, $"{Api}/posts/{post}/comments", new { content = "thừa" });
+        // Sửa, thích và đọc không bị giới hạn.
+        await Expect(HttpStatusCode.OK, HttpMethod.Put, $"{Api}/posts/{post}/like");
+        Assert.Equal(30, await Db(async db => await db.Posts.CountAsync(x => x.AuthorId == users["student"]) +
+            await db.Comments.CountAsync(x => x.AuthorId == users["student"])));
+
+        await As("classmate");
+        await Expect(HttpStatusCode.Created, HttpMethod.Post, $"{Api}/classes/{classId}/posts", new { content = "vẫn được" });
+
+        factory.Clock.Shift = TimeSpan.FromMinutes(61);
+        await As("student");
+        await Expect(HttpStatusCode.Created, HttpMethod.Post, $"{Api}/classes/{classId}/posts", new { content = "sau một giờ" });
+        await Expect(HttpStatusCode.Created, HttpMethod.Post, $"{Api}/posts/{post}/comments", new { content = "sau một giờ" });
+    }
+
+    private sealed class ShiftClock : TimeProvider
+    {
+        public TimeSpan Shift { get; set; }
+        public override DateTimeOffset GetUtcNow() => System.GetUtcNow() + Shift;
+    }
+
     private sealed class Tv4Factory : WebApplicationFactory<Program>
     {
         private readonly List<SqliteConnection> connections = [];
+        public ShiftClock Clock { get; } = new();
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -883,6 +1010,8 @@ public sealed class Tv4NotificationFeedbackTests : IAsyncLifetime
                 Sqlite<IdentityDbContext>(services); Sqlite<AcademicDbContext>(services);
                 Sqlite<EnrollmentDbContext>(services); Sqlite<MediaNotificationDbContext>(services);
                 Sqlite<FinanceDbContext>(services);
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton<TimeProvider>(Clock);
             });
         }
 
