@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { ArrowRight, BookOpen } from "lucide-react";
 import { ApiError } from "./api";
+import { pageCount } from "./format";
 
 export function ErrorMessage({ error }: { error: unknown }) {
     if (!error) return null;
@@ -32,6 +33,23 @@ export function PageHeading({
             <p>{subtitle}</p>
         </div>
     );
+}
+export function Pager({ page, pageSize, total, change, label, disabled = false }: {
+    page: number; pageSize: number; total: number; change: (page: number) => void; label: string; disabled?: boolean;
+}) {
+    return (
+        <div className="academic-actions data-pagination" role="group" aria-label={label}>
+            <span role="status">Trang {page} / {pageCount(total, pageSize)} · {total} mục</span>
+            <button type="button" className="secondary" disabled={disabled || page <= 1} onClick={() => change(page - 1)}>Trang trước</button>
+            <button type="button" className="secondary" disabled={disabled || page * pageSize >= total} onClick={() => change(page + 1)}>Trang sau</button>
+        </div>
+    );
+}
+export const fieldProps = (id: string, errors?: string[]) => ({
+    id, "aria-invalid": !!errors?.length, "aria-describedby": errors?.length ? `${id}-error` : undefined,
+});
+export function FieldError({ id, errors }: { id: string; errors?: string[] }) {
+    return errors?.length ? <p id={`${id}-error`} className="field-error" role="alert">{errors.join(" ")}</p> : null;
 }
 export function Unavailable({ title, text }: { title: string; text: string }) {
     return (
