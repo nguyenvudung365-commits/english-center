@@ -10,7 +10,7 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    branch 'main'
+                    branch pattern: 'main', comparator: 'EQUALS'
                     not { buildingTag() }
                     not { changeRequest() }
                     expression { env.ENGLISH_CENTER_AUTO_DEPLOY == 'true' }
