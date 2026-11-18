@@ -1005,7 +1005,7 @@ footer {
     padding-block: 18px;
     border-bottom: 1px solid #e2e8f0;
 }
-.assignment-description { white-space: pre-wrap; }
+.assignment-description { white-space: pre-wrap; overflow-wrap: anywhere; }
 .academic-filters {
     display: flex;
     align-items: end;
@@ -1177,4 +1177,34 @@ footer {
     .data-pagination span { flex-basis: 100%; }
     .statistics-chart { overflow-x: auto; }
     .statistics-chart svg { min-width: 640px; }
+}
+
+.story-line + .story-line { margin-top: 26px; }
+.icon-link { position: relative; }
+.icon-link .badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 20px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #b91c1c;
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1.5;
+    text-align: center;
+}
+.check-row { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 0; cursor: pointer; }
+.check-row input { width: 20px; height: 20px; min-height: 20px; margin: 0; padding: 0; accent-color: var(--accent); flex: none; }
+.academic-filters .academic-field { flex: 1 1 240px; }
+.academic-form textarea, .academic-field textarea { display: block; margin-top: 7px; }
+.catalog-list details summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 8px; }
+.feed { margin-top: 24px; }
+.feed .catalog-list li { padding-bottom: 18px; }
+.feed-comments { margin-top: 16px; padding-left: 16px; border-left: 3px solid var(--border); }
+.feed-comments h4 { margin: 0 0 8px; }
+@media (max-width: 760px) {
+    .feed-comments { padding-left: 10px; }
+    .academic-actions button, .academic-actions .secondary, .academic-actions .primary { flex: 1 1 auto; }
 }
