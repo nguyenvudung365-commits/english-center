@@ -21,13 +21,18 @@ import {
     ChartNoAxesCombined,
     Check,
     ChevronRight,
+    CircleHelp,
+    ClipboardList,
     GraduationCap,
     LayoutDashboard,
     LockKeyhole,
     LogOut,
     Menu,
     MessageSquare,
+    NotebookPen,
+    Receipt,
     ShieldCheck,
+    TriangleAlert,
     UserRound,
     X,
 } from "lucide-react";
@@ -51,10 +56,17 @@ import {
 } from "./academic-pages";
 import { ErrorMessage, PageHeading, Unavailable } from "./ui";
 import { Assignments, AssignmentDetails, Enrollments } from "./assignment-pages";
+import { PracticeDetails, PracticePage } from "./practice-pages";
 import { AccountCreate, ProfilePanel } from "./identity-pages";
 import { Schedule, SessionDetails } from "./schedule-pages";
 import { AttendancePage } from "./attendance-pages";
 import { ProgressPage, StatisticsPage } from "./statistics-pages";
+import { Notifications } from "./notification-pages";
+import { FaqManagePage, FaqPage, FeedbackPage } from "./feedback-pages";
+import { Invoices } from "./finance-pages";
+import { PlacementTests, Warnings } from "./monitoring-pages";
+import { ClassFeed } from "./feed-pages";
+import { bellLabel, getUnread, getUnreadCount, setUnread, subscribeUnread, unreadBadge } from "./notifications";
 import "./styles.css";
 
 const labels = {
@@ -90,6 +102,20 @@ function Login({ notice }: { notice: string }) {
                         <div>
                             <strong>Học tập có định hướng</strong>
                             <p>Sẵn sàng cho chặng đường tiếp theo.</p>
+                        </div>
+                    </div>
+                    <div className="story-line">
+                        <span>02</span>
+                        <div>
+                            <strong>Lớp học, lịch và điểm danh</strong>
+                            <p>Theo dõi lớp, lịch học và điểm danh của bạn.</p>
+                        </div>
+                    </div>
+                    <div className="story-line">
+                        <span>03</span>
+                        <div>
+                            <strong>Bài tập, điểm và thông báo</strong>
+                            <p>Nhận bài tập, điểm và thông báo ở một nơi.</p>
                         </div>
                     </div>
                 </div>
@@ -215,7 +241,7 @@ function Overview() {
                 <NavLink className="tile" to="/notifications">
                     <Bell />
                     <h3>Thông báo</h3>
-                    <p>Theo dõi trạng thái tích hợp thông báo từ trung tâm.</p>
+                    <p>Xem thông báo về ghi danh, bài tập, điểm, hóa đơn và cảnh báo.</p>
                     <span>
                         Mở thông báo <ChevronRight size={16} />
                     </span>
@@ -346,9 +372,14 @@ const commonLinks = [
     { to: "/progress", label: "Tiến độ học tập", icon: ChartNoAxesCombined },
     { to: "/notifications", label: "Thông báo", icon: Bell },
     { to: "/feedback", label: "Phản hồi", icon: MessageSquare },
+    { to: "/warnings", label: "Cảnh báo", icon: TriangleAlert },
+    { to: "/placement-tests", label: "Hẹn test đầu vào", icon: ClipboardList },
+    { to: "/faq", label: "Câu hỏi thường gặp", icon: CircleHelp },
     { to: "/statistics", label: "Thống kê", icon: ChartNoAxesCombined },
     { to: "/account", label: "Tài khoản", icon: UserRound },
 ];
+// Backend trả 403 cho Teacher ở các mục này nên ẩn khỏi menu.
+const hiddenFromTeacher = ["/feedback", "/warnings", "/placement-tests"];
 function navigation(role: import("./api").Role) {
     const manager = canManageAcademic(role);
     const operational = [
@@ -359,6 +390,9 @@ function navigation(role: import("./api").Role) {
                   { to: "/teachers", label: "Giáo viên", icon: UserRound },
                   { to: "/users/new", label: "Tạo tài khoản", icon: ShieldCheck },
               ]
+            : []),
+        ...(role === "Admin"
+            ? [{ to: "/faq/manage", label: "Quản trị FAQ", icon: CircleHelp }]
             : []),
         ...(manager || role === "Student"
             ? [
@@ -376,36 +410,26 @@ function navigation(role: import("./api").Role) {
                           role === "Student"
                               ? "Học phí của tôi"
                               : "Hóa đơn & học phí",
-                      icon: BookOpen,
+                      icon: Receipt,
                   },
               ]
             : []),
         { to: "/attendance", label: role === "Student" ? "Điểm danh của tôi" : "Điểm danh", icon: Check },
         { to: "/assignments", label: "Bài tập", icon: BookOpen },
+        { to: "/practice", label: "Luyện tập", icon: NotebookPen },
     ];
     return [
         ...commonLinks.slice(0, 2),
         ...operational,
         ...commonLinks.slice(2),
-    ].filter((link) => link.to !== "/statistics" || role === "Student").map((link) => ({
-        ...link,
-        unavailable:
-            ![
-                "/",
-                "/account",
-                "/classes",
-                "/schedule",
-                "/attendance",
-                "/progress",
-                ...(role === "Student" ? ["/statistics"] : []),
-                "/classes/new",
-                "/courses",
-                "/teachers",
-                "/assignments",
-                "/users/new",
-                ...(manager ? ["/enrollment"] : []),
-            ].includes(link.to),
-    }));
+    ]
+        .filter((link) => link.to !== "/statistics" || role === "Student")
+        .filter((link) => role !== "Teacher" || !hiddenFromTeacher.includes(link.to))
+        .map((link) => ({
+            ...link,
+            // Chỉ còn "Ghi danh của tôi" của học viên: backend chưa có API liệt kê ghi danh cho Student.
+            unavailable: role === "Student" && link.to === "/enrollment",
+        }));
 }
 function App() {
     const session = useSyncExternalStore(subscribe, getSession);
@@ -425,6 +449,24 @@ function App() {
     const [leaving, setLeaving] = useState(false);
     const location = useLocation();
     const authenticated = user !== null;
+    const unread = useSyncExternalStore(subscribeUnread, getUnread);
+    useEffect(() => {
+        // Chỉ đọc nhẹ khi vào app/đổi route; trang Thông báo tự cập nhật số này.
+        if (!authenticated) {
+            setUnread(null);
+            return;
+        }
+        if (location.pathname === "/notifications") return;
+        const controller = new AbortController();
+        const version = getSessionGeneration();
+        void getUnreadCount(controller.signal).then(
+            (value) => {
+                if (!controller.signal.aborted && version === getSessionGeneration()) setUnread(value.unreadCount);
+            },
+            () => undefined,
+        );
+        return () => controller.abort();
+    }, [location.pathname, generation, authenticated]);
     const drawerOpen = mobile && open && authenticated;
     const dismissDrawer = () => {
         setOpen(false);
@@ -540,6 +582,10 @@ function App() {
               ? "Chi tiết lớp học"
               : location.pathname.startsWith("/schedule/")
                 ? "Chi tiết buổi học"
+                : location.pathname.startsWith("/assignments/")
+                  ? "Chi tiết bài tập"
+                  : location.pathname.startsWith("/practice/")
+                    ? "Chi tiết luyện tập"
               : (links.find((link) => link.to === location.pathname)?.label ??
                 "Trang");
     return (
@@ -590,7 +636,7 @@ function App() {
                 >
                     {links.map((link) => (
                         <NavLink
-                            end={link.to === "/"}
+                            end={link.to === "/" || link.to === "/faq"}
                             className={
                                 link.to === "/classes/new"
                                     ? ({ isActive }) =>
@@ -671,9 +717,14 @@ function App() {
                     <NavLink
                         className="icon-link"
                         to="/notifications"
-                        aria-label="Thông báo"
+                        aria-label={bellLabel(unread)}
                     >
                         <Bell size={20} />
+                        {unreadBadge(unread) && (
+                            <span className="badge" aria-hidden="true">
+                                {unreadBadge(unread)}
+                            </span>
+                        )}
                     </NavLink>
                 </header>
                 <main ref={mainRef} id="main-content" tabIndex={-1}>
@@ -695,7 +746,13 @@ function App() {
                         />
                         <Route
                             path="/classes/:id"
-                            element={<ClassDetails />}
+                            element={
+                                <ClassDetails
+                                    feed={(classId) => (
+                                        <ClassFeed classId={classId} />
+                                    )}
+                                />
+                            }
                         />
                         <Route path="/schedule" element={<Schedule />} />
                         <Route path="/schedule/:id" element={<SessionDetails />} />
@@ -722,35 +779,16 @@ function App() {
                         />
                         <Route path="/assignments" element={<Assignments />} />
                         <Route path="/assignments/:id" element={<AssignmentDetails />} />
+                        <Route path="/practice" element={<PracticePage />} />
+                        <Route path="/practice/:id" element={<PracticeDetails />} />
                         <Route path="/enrollment" element={<Enrollments />} />
-                        {[
-                            {
-                                path: "/invoices",
-                                title: "Hóa đơn & học phí",
-                                text: "Finance chưa có API truy vấn hóa đơn, học phí hoặc thanh toán. Trang này không tạo hóa đơn, thu tiền hay xác nhận đã thanh toán; chưa có số dư hoặc tổng tiền để hiển thị.",
-                            },
-                            {
-                                path: "/notifications",
-                                title: "Thông báo",
-                                text: "API danh sách và đánh dấu thông báo đã đọc chưa được triển khai. Đây không phải hộp thư trống.",
-                            },
-                            {
-                                path: "/feedback",
-                                title: "Phản hồi",
-                                text: "API gửi và xử lý phản hồi chưa sẵn sàng. Vui lòng liên hệ trực tiếp giáo vụ; trang này chưa gửi hay lưu phản hồi.",
-                            },
-                        ].map((page) => (
-                            <Route
-                                key={page.path}
-                                path={page.path}
-                                element={
-                                    <Unavailable
-                                        title={page.title}
-                                        text={page.text}
-                                    />
-                                }
-                            />
-                        ))}
+                        <Route path="/invoices" element={<Invoices />} />
+                        <Route path="/notifications" element={<Notifications />} />
+                        <Route path="/feedback" element={<FeedbackPage />} />
+                        <Route path="/faq" element={<FaqPage />} />
+                        <Route path="/faq/manage" element={<FaqManagePage />} />
+                        <Route path="/warnings" element={<Warnings />} />
+                        <Route path="/placement-tests" element={<PlacementTests />} />
                         <Route
                             path="/login"
                             element={<Navigate to="/" replace />}
