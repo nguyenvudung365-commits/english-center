@@ -1,5 +1,6 @@
 using EnglishCenter.BuildingBlocks.Security;
 using EnglishCenter.Modules.Enrollment.Application.Registrations;
+using EnglishCenter.Modules.Enrollment.Application.Monitoring;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -20,6 +21,10 @@ public sealed class EnrollmentsController(EnrollmentService service) : Controlle
 
     [HttpGet("{id:guid}"), Authorize(Roles = Managers + "," + Roles.Student)]
     public Task<EnrollmentResponse> Get(Guid id, CancellationToken ct) => service.GetAsync(id, ct);
+
+    [HttpGet("mine"), Authorize(Roles = Roles.Student)]
+    public Task<PageResult<MyEnrollmentResponse>> Mine(CancellationToken ct, [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20) => service.ListMineAsync(page, pageSize, ct);
 
     // Đối soát thủ công khi event bus trong bộ nhớ đã bỏ qua handler lỗi.
     [HttpPost("{id:guid}/replay"), Authorize(Roles = Managers)]

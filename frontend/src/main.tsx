@@ -423,12 +423,7 @@ function navigation(role: import("./api").Role) {
         ...commonLinks.slice(2),
     ]
         .filter((link) => link.to !== "/statistics" || role === "Student")
-        .filter((link) => role !== "Teacher" || !hiddenFromTeacher.includes(link.to))
-        .map((link) => ({
-            ...link,
-            // Chỉ còn "Ghi danh của tôi" của học viên: backend chưa có API liệt kê ghi danh cho Student.
-            unavailable: role === "Student" && link.to === "/enrollment",
-        }));
+        .filter((link) => role !== "Teacher" || !hiddenFromTeacher.includes(link.to));
 }
 function App() {
     const session = useSyncExternalStore(subscribe, getSession);
@@ -641,11 +636,6 @@ function App() {
                         >
                             <link.icon size={19} />
                             {link.label}
-                            {link.unavailable && (
-                                <small className="nav-status">
-                                    Chưa có API
-                                </small>
-                            )}
                         </NavLink>
                     ))}
                 </nav>

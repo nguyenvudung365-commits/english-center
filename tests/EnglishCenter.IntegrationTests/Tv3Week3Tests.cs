@@ -19,6 +19,7 @@ using EnglishCenter.Modules.Finance.Infrastructure.Persistence;
 using EnglishCenter.Modules.Identity.Application.Authentication;
 using EnglishCenter.Modules.Identity.Domain.Users;
 using EnglishCenter.Modules.Identity.Infrastructure.Persistence;
+using EnglishCenter.Modules.MediaNotification.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -52,6 +53,7 @@ public sealed partial class Tv3Week3Tests : IAsyncLifetime
             await Initialize(sp.GetRequiredService<AcademicDbContext>());
             await Initialize(sp.GetRequiredService<EnrollmentDbContext>());
             await Initialize(sp.GetRequiredService<FinanceDbContext>());
+            await Initialize(sp.GetRequiredService<MediaNotificationDbContext>());
             var identity = sp.GetRequiredService<IdentityDbContext>();
             var passwords = sp.GetRequiredService<IPasswordService>();
             foreach (var role in new[] { Roles.Staff, Roles.Admin })
@@ -641,12 +643,14 @@ public sealed partial class Tv3Week3Tests : IAsyncLifetime
                 ["Jwt:SigningKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48)),
                 ["Logging:LogLevel:Default"] = "Warning", ["Logging:LogLevel:Microsoft"] = "Warning",
                 ["Identity:InitializeDatabase"] = "false", ["Academic:InitializeDatabase"] = "false",
-                ["Enrollment:InitializeDatabase"] = "false", ["Finance:InitializeDatabase"] = "false"
+                ["Enrollment:InitializeDatabase"] = "false", ["Finance:InitializeDatabase"] = "false",
+                ["MediaNotification:InitializeDatabase"] = "false"
             }));
             builder.ConfigureServices(services =>
             {
                 Replace<IdentityDbContext>(services, "identity"); Replace<AcademicDbContext>(services, "academic");
                 Replace<EnrollmentDbContext>(services, "enrollment", EnrollmentSave); Replace<FinanceDbContext>(services, "finance", FinanceSave);
+                Replace<MediaNotificationDbContext>(services, "media_notification");
                 if (!Postgres)
                 {
                     services.RemoveAll<IStudentCodeGenerator>();
