@@ -6,13 +6,13 @@ import { useRead as useLoad } from "./academic-pages";
 import { allVisibleClasses, ReadFeedback } from "./attendance-pages";
 import {
     assignmentKindLabel, assignmentKinds, assignmentKindLabels, assignmentStatuses, assignmentStatusLabel, assignmentStatusLabels,
-    ASSIGNMENT_DESCRIPTION_MAX, ASSIGNMENT_LABEL_MAX, ASSIGNMENT_TITLE_MAX, canGrade, createAssignment, emptyAssignmentDraft, FEEDBACK_MAX,
+    ASSIGNMENT_DESCRIPTION_MAX, ASSIGNMENT_LESSON_MAX, ASSIGNMENT_TITLE_MAX, ASSIGNMENT_UNIT_MAX, canGrade, createAssignment, emptyAssignmentDraft, FEEDBACK_MAX,
     formatScore, gradeSubmission, isAssignmentLocked, isGraded, listClassAssignments, listGradeHistory, listMyAssignments, publishAssignment,
     scoreInput, studentLabel, studentScoreText, submissionStatuses, submissionStatusLabel, submissionStatusLabels, updateAssignment, validateAssignmentDraft,
     validateGradeDraft, type AssignmentDraft, type GradeDraft,
 } from "./coursework";
 import { formatVnDateTime, utcToVnLocal } from "./format";
-import { getScheduledSession, listSessions } from "./schedule";
+import { calendarRange, getScheduledSession, listSessions } from "./schedule";
 import { ErrorMessage, FieldError, fieldProps, PageHeading, Pager } from "./ui";
 import { submissionAccept, submitAssignment, validateSubmissionFiles, type Assignment, type Submission, type UploadStatus } from "./submissions";
 
@@ -185,11 +185,30 @@ function ManagerAssignments() {
 }
 
 function SessionSelect({ id, classId, value, disabled, errors, onChange }: { id: string; classId: string; value: string; disabled: boolean; errors?: string[]; onChange: (value: string) => void }) {
-    const [range] = useState(() => { const now = Date.now(); return { fromUtc: new Date(now - 30 * 86400000).toISOString(), toUtc: new Date(now + 60 * 86400000).toISOString() }; });
-    const load = useCallback(() => listSessions({ classId, ...range }), [classId, range]);
+    const [defaultRange] = useState(() => {
+        const now = Date.now();
+        return { fromUtc: new Date(now - 30 * 86400000).toISOString(), toUtc: new Date(now + 60 * 86400000).toISOString() };
+    });
+    const [date, setDate] = useState("");
+    const [dateError, setDateError] = useState<unknown>(null);
+    const { fromUtc, toUtc } = date ? calendarRange(date, "month") : defaultRange;
+    const load = useCallback(() => listSessions({ classId, fromUtc, toUtc }), [classId, fromUtc, toUtc]);
     const sessions = useLoad(load);
     const field = fieldProps(id, errors);
     return <div className="academic-field">
+        {!disabled && <>
+            <label htmlFor={`${id}-date`}>Ngày để tìm buổi học</label>
+            <input id={`${id}-date`} type="date" value={date} aria-describedby={`${id}-date-help`} onChange={event => {
+                const next = event.target.value;
+                try {
+                    if (next) calendarRange(next, "month");
+                    setDate(next);
+                    setDateError(null);
+                } catch { setDateError(new Error("Ngày nằm ngoài khoảng lịch được hỗ trợ.")); }
+            }} />
+            <p id={`${id}-date-help`} className="small muted">Chọn một ngày trong tháng cần tìm (giờ Việt Nam, UTC+7). Để trống để xem từ 30 ngày trước đến 60 ngày tới.</p>
+            <ErrorMessage error={dateError} />
+        </>}
         <label htmlFor={id}>Buổi học (bắt buộc trước khi công bố)</label>
         <select {...field} value={value} disabled={disabled || sessions.loading} aria-describedby={[field["aria-describedby"], `${id}-help`].filter(Boolean).join(" ")} onChange={event => onChange(event.target.value)}>
             <option value="">Chưa chọn buổi</option>
@@ -197,8 +216,8 @@ function SessionSelect({ id, classId, value, disabled, errors, onChange }: { id:
             {sessions.data?.map(item => <option key={item.id} value={item.id}>{[item.unit, item.lesson].filter(Boolean).join(" · ")} · {formatVnDateTime(item.startsAtUtc)}</option>)}
         </select>
         <FieldError id={id} errors={errors} />
-        <p id={`${id}-help`} className="small muted">Liệt kê buổi của lớp từ 30 ngày trước đến 60 ngày tới. Unit/Lesson để trống sẽ lấy theo buổi đã chọn. Lưu nháp thì có thể chọn buổi sau.</p>
-        {sessions.data?.length === 0 && <p className="small muted">Lớp chưa có buổi học trong khoảng này. Hãy tạo buổi ở trang Lịch học trước khi công bố bài.</p>}
+        <p id={`${id}-help`} className="small muted">Unit/Lesson để trống sẽ lấy theo buổi đã chọn. Lưu nháp thì có thể chọn buổi sau.</p>
+        {!disabled && sessions.data?.length === 0 && <p className="small muted" role="status">Không có buổi học trong khoảng lịch này. Hãy chọn ngày khác hoặc tạo buổi ở trang Lịch học.</p>}
         <ReadFeedback result={sessions} />
     </div>;
 }
@@ -243,13 +262,13 @@ function AssignmentForm({ id, classId, initial, locked, create, busy, children, 
             <FieldError id={`${id}-kind`} errors={shown.kind} />
         </div>
         <div className="academic-field">
-            <label htmlFor={`${id}-unit`}>Unit (tối đa {ASSIGNMENT_LABEL_MAX} ký tự)</label>
-            <input {...fieldProps(`${id}-unit`, shown.unit)} maxLength={ASSIGNMENT_LABEL_MAX} disabled={busy} value={draft.unit} onChange={event => set({ unit: event.target.value })} />
+            <label htmlFor={`${id}-unit`}>Unit (tối đa {ASSIGNMENT_UNIT_MAX} ký tự)</label>
+            <input {...fieldProps(`${id}-unit`, shown.unit)} maxLength={ASSIGNMENT_UNIT_MAX} disabled={busy} value={draft.unit} onChange={event => set({ unit: event.target.value })} />
             <FieldError id={`${id}-unit`} errors={shown.unit} />
         </div>
         <div className="academic-field">
-            <label htmlFor={`${id}-lesson`}>Lesson (tối đa {ASSIGNMENT_LABEL_MAX} ký tự)</label>
-            <input {...fieldProps(`${id}-lesson`, shown.lesson)} maxLength={ASSIGNMENT_LABEL_MAX} disabled={busy} value={draft.lesson} onChange={event => set({ lesson: event.target.value })} />
+            <label htmlFor={`${id}-lesson`}>Lesson (tối đa {ASSIGNMENT_LESSON_MAX} ký tự)</label>
+            <input {...fieldProps(`${id}-lesson`, shown.lesson)} maxLength={ASSIGNMENT_LESSON_MAX} disabled={busy} value={draft.lesson} onChange={event => set({ lesson: event.target.value })} />
             <FieldError id={`${id}-lesson`} errors={shown.lesson} />
         </div>
         <div className="academic-field">

@@ -6,7 +6,8 @@ import type { Assignment, Submission } from "./submissions";
 // Hằng số khớp giới hạn máy chủ (Assignment/Submission/PracticeExercise).
 export const ASSIGNMENT_TITLE_MAX = 200;
 export const ASSIGNMENT_DESCRIPTION_MAX = 5000;
-export const ASSIGNMENT_LABEL_MAX = 100;
+export const ASSIGNMENT_UNIT_MAX = 100;
+export const ASSIGNMENT_LESSON_MAX = 200;
 export const FEEDBACK_MAX = 2000;
 export const PRACTICE_TITLE_MAX = 200;
 export const PRACTICE_CONTENT_MAX = 20000;
@@ -68,8 +69,8 @@ export function validateAssignmentDraft(draft: AssignmentDraft, locked = false, 
     const errors: Record<string, string[]> = {};
     if (!draft.title.trim() || draft.title.trim().length > ASSIGNMENT_TITLE_MAX) errors.title = [`Tiêu đề bắt buộc, tối đa ${ASSIGNMENT_TITLE_MAX} ký tự.`];
     if (draft.description.length > ASSIGNMENT_DESCRIPTION_MAX) errors.description = [`Hướng dẫn tối đa ${ASSIGNMENT_DESCRIPTION_MAX} ký tự.`];
-    if (draft.unit.trim().length > ASSIGNMENT_LABEL_MAX) errors.unit = [`Unit tối đa ${ASSIGNMENT_LABEL_MAX} ký tự.`];
-    if (draft.lesson.trim().length > ASSIGNMENT_LABEL_MAX) errors.lesson = [`Lesson tối đa ${ASSIGNMENT_LABEL_MAX} ký tự.`];
+    if (draft.unit.trim().length > ASSIGNMENT_UNIT_MAX) errors.unit = [`Unit tối đa ${ASSIGNMENT_UNIT_MAX} ký tự.`];
+    if (draft.lesson.trim().length > ASSIGNMENT_LESSON_MAX) errors.lesson = [`Lesson tối đa ${ASSIGNMENT_LESSON_MAX} ký tự.`];
     if (!locked) {
         if (!(assignmentKinds as readonly string[]).includes(draft.kind)) errors.kind = ["Chọn Trên lớp hoặc Về nhà."];
         const opens = vnLocalToIso(draft.opensLocal);

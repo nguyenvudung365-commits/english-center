@@ -357,7 +357,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
     private static void CheckLabels(string? unit, string? lesson)
     {
         if (unit?.Trim().Length > Assignment.UnitMaxLength || lesson?.Trim().Length > Assignment.LessonMaxLength)
-            throw new AcademicFailure(400, "Unit and lesson must not exceed 100 characters.");
+            throw new AcademicFailure(400, $"Unit must not exceed {Assignment.UnitMaxLength} characters and lesson must not exceed {Assignment.LessonMaxLength} characters.");
     }
 
     private static AssignmentKind? ParseKind(string? value) =>

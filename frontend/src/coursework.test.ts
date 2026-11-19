@@ -103,14 +103,14 @@ describe("vai trò và trạng thái", () => {
 describe("form bài tập và luyện tập", () => {
     it("form bài tập hợp lệ", () => {
         expect(validateAssignmentDraft(draft())).toEqual({});
-        expect(validateAssignmentDraft(draft({ kind: "InClass", unit: "u".repeat(100), lesson: "l".repeat(100) }))).toEqual({});
+        expect(validateAssignmentDraft(draft({ kind: "InClass", unit: "u".repeat(100), lesson: "l".repeat(200) }))).toEqual({});
     });
     it("bắt lỗi tiêu đề, hướng dẫn, nhãn, loại và thời gian", () => {
         expect(validateAssignmentDraft(draft({ title: "  " }))).toHaveProperty("title");
         expect(validateAssignmentDraft(draft({ title: "a".repeat(201) }))).toHaveProperty("title");
         expect(validateAssignmentDraft(draft({ description: "a".repeat(5001) }))).toHaveProperty("description");
         expect(validateAssignmentDraft(draft({ unit: "u".repeat(101) }))).toHaveProperty("unit");
-        expect(validateAssignmentDraft(draft({ lesson: "l".repeat(101) }))).toHaveProperty("lesson");
+        expect(validateAssignmentDraft(draft({ lesson: "l".repeat(201) }))).toHaveProperty("lesson");
         expect(validateAssignmentDraft(draft({ kind: "Khác" }))).toHaveProperty("kind");
         expect(validateAssignmentDraft(draft({ opensLocal: "" }))).toHaveProperty("opensLocal");
         expect(validateAssignmentDraft(draft({ closesLocal: "2026-02-30T10:00" }))).toHaveProperty("closesLocal");

@@ -62,8 +62,8 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         .HasColumnName("kind");
 
                     b.Property<string>("Lesson")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
                         .HasColumnName("lesson");
 
                     b.Property<DateTimeOffset?>("ObligationsResolvedAt")

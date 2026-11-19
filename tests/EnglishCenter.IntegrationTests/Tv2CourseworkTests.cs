@@ -684,6 +684,23 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Publishing_InheritsTheFullLessonFromASessionAtItsLengthLimit()
+    {
+        var lesson = new string('x', 200);
+        var sessionId = await CourseworkSessions.SeedAsync(factory.Services, classId, lesson: lesson);
+        await As("teacher");
+        var now = DateTimeOffset.UtcNow;
+        var response = await client.PostAsJsonAsync("/api/academic/assignments", new
+        {
+            classId, title = "Gắn buổi có Lesson dài", opensAtUtc = now.AddHours(-1), closesAtUtc = now.AddHours(2), sessionId
+        });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var item = await Json(response);
+        Assert.Equal(lesson, item.GetProperty("lesson").GetString());
+        Assert.Equal("Open", item.GetProperty("status").GetString());
+    }
+
+    [Fact]
     public async Task SubmissionAndRecipientLists_ShowStudentNamesFromIdentity()
     {
         await Enroll(); await Enroll("other-student");

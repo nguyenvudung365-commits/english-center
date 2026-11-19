@@ -52,11 +52,11 @@ Không có quyền lớp → 403 (giữ hành vi các endpoint bài tập đã c
 
 **Buổi học (Session, TV1):** `ISessionCatalog` đọc bảng buổi học thật của TV1 (US-08). Server:
 - kiểm tra `sessionId` tồn tại và thuộc **đúng lớp** của bài (sai → 400, lỗi trường `sessionId`);
-- lấy Unit/Lesson mặc định từ buổi nếu để trống (nhập tay thì giữ nguyên);
+- lấy Unit/Lesson mặc định từ buổi nếu để trống (nhập tay thì giữ nguyên); Unit tối đa 100 ký tự, Lesson tối đa 200 ký tự;
 - **bắt buộc gắn buổi trước khi công bố** (AC-05): tạo với `publish` mặc định mà thiếu buổi → 409 và không lưu; nháp chưa gắn buổi gọi `POST …/publish` → 409. Sửa nháp với `sessionId` rồi công bố lại;
 - bài đã công bố không đổi sang buổi khác (409). Bài cũ đã công bố trước khi bật không bị ảnh hưởng.
 
-Frontend: ô “Buổi học” bắt buộc khi công bố ngay, không bắt buộc khi “Lưu nháp”; trang chi tiết hiện Unit/Lesson và giờ của buổi đã gắn.
+Frontend: ô “Buổi học” bắt buộc khi công bố ngay, không bắt buộc khi “Lưu nháp”. Chọn ngày trong biểu mẫu để tìm buổi ở tháng khác; đổi ngày tìm không bỏ buổi đã chọn. Trang chi tiết hiện Unit/Lesson và giờ của buổi đã gắn.
 
 ## 3. Chấm điểm (US-21)
 
