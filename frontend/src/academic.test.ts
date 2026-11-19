@@ -53,8 +53,9 @@ const courses: Course[] = [
 const teachers: Teacher[] = [
     { id: teacherId, fullName: "Nguyễn An", email: "teacher@example.test" },
 ];
+const academicToken = (suffix = "original") => `jwt.${btoa(JSON.stringify({ sub: "test-user", role: "Staff" }))}.${suffix}`;
 const session = (expired = false): Session => ({
-    accessToken: "academic-access-token",
+    accessToken: academicToken(),
     accessTokenExpiresAt: new Date(
         Date.now() + (expired ? -60000 : 600000),
     ).toISOString(),
@@ -170,7 +171,7 @@ describe("Academic API contract through the real session client", () => {
         expect(url).toBe(path);
         expect(init?.method ?? "GET").toBe("GET");
         expect(init?.body).toBeUndefined();
-        expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer academic-access-token");
+        expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${academicToken()}`);
     }
 
     it("GETs the course catalog unchanged, including nullable descriptions", async () => {
@@ -207,7 +208,7 @@ describe("Academic API contract through the real session client", () => {
         expect(url).toBe("/api/academic/classes");
         expect(init?.method).toBe("POST");
         const headers = new Headers(init?.headers);
-        expect(headers.get("Authorization")).toBe("Bearer academic-access-token");
+        expect(headers.get("Authorization")).toBe(`Bearer ${academicToken()}`);
         expect(headers.get("Content-Type")).toBe("application/json");
         expect(JSON.parse(String(init?.body))).toEqual({
             code: "IELTS.A_1-2",
@@ -307,14 +308,16 @@ describe("Academic API contract through the real session client", () => {
 
     it("uses the shared refresh before reading with an expired token", async () => {
         setSession(session(true));
-        const rotated = { ...session(), accessToken: "rotated-access", refreshToken: "rotated-refresh" };
+        const rotated = { ...session(), accessToken: academicToken("rotated"), refreshToken: "rotated-refresh" };
         fetcher.mockResolvedValueOnce(json(rotated)).mockResolvedValueOnce(json(courses));
         expect(await listCourses()).toEqual(courses);
         expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
             "/api/identity/auth/refresh", "/api/academic/courses",
         ]);
-        expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual({ refreshToken: "academic-refresh-token" });
-        expect(new Headers(fetcher.mock.calls[1][1]?.headers).get("Authorization")).toBe("Bearer rotated-access");
+        // Cookie mode: the refresh token is HttpOnly, so the browser sends only the opt-in header and an empty body.
+        expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual({});
+        expect(new Headers(fetcher.mock.calls[0][1]?.headers).get("X-Session-Mode")).toBe("cookie");
+        expect(new Headers(fetcher.mock.calls[1][1]?.headers).get("Authorization")).toBe(`Bearer ${rotated.accessToken}`);
     });
 
     it("keeps shared 401 retry bounded and clears a rejected session", async () => {
@@ -354,7 +357,7 @@ describe("Academic class paging contract", () => {
         expect(Object.fromEntries(parsed.searchParams)).toEqual({ page: "1", pageSize: "20" });
         expect(init?.method ?? "GET").toBe("GET");
         expect(init?.body).toBeUndefined();
-        expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer academic-access-token");
+        expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${academicToken()}`);
         expect(fetcher).toHaveBeenCalledTimes(1);
     });
 

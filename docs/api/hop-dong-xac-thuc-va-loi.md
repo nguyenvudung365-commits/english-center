@@ -11,6 +11,17 @@ Dành cho frontend và các module (TV2/TV3/TV4). Người phụ trách: TV1 (Id
 5. `POST /api/identity/auth/change-password` (Bearer) thu hồi mọi refresh token của người dùng.
 6. Access token đã phát không bị thu hồi trước hạn. Auth endpoint giới hạn 20 yêu cầu/phút/IP (429).
 
+### Chế độ trình duyệt (cookie)
+
+Web dùng header opt-in `X-Session-Mode: cookie` (đúng chữ `cookie`, không phân biệt hoa thường) trên `login`, `refresh`, `logout`. Không có header, hành vi JSON ở trên giữ nguyên và cookie bị bỏ qua.
+
+- `login`/`refresh` trả `{ accessToken, accessTokenExpiresAt, sessionId }` (không có refresh token trong JSON) và đặt cookie `ec_refresh`: `HttpOnly`, `SameSite=Strict`, `Path=/api/identity/auth`, host-only (không `Domain`), không `Expires`/`Max-Age` (cookie phiên trình duyệt), `Secure` ở mọi môi trường trừ Development. `sessionId` là mã đối chiếu, không phải thông tin xác thực.
+- `refresh` đọc cookie, body `{}` hoặc không body. Thiếu/sai/đã xoay vòng: 401. Cookie đổi khi refresh nhưng `sessionId` giữ nguyên. Tab đã đăng nhập gửi `X-Expected-Session`; cookie thuộc phiên khác trả 401, không sửa cookie. Web dùng Web Locks để tuần tự hóa các thao tác thay đổi cookie giữa các tab.
+- `logout` dùng cookie, body `{}` hoặc không body. Web gửi `X-Expected-Session` ngay cả khi access token đã hết hạn. Phiên không khớp trả 401, không sửa cookie; phiên khớp được thu hồi và xóa cookie. Nếu chưa xác nhận đăng xuất, web lưu tạm mã đối chiếu (không lưu token) để thử lại thay vì khôi phục phiên khi tải lại. Access token đã phát vẫn có thể dùng cho đến khi hết hạn.
+- `change-password` vẫn Bearer và thu hồi mọi phiên; web gọi tiếp `logout` để xoá cookie.
+- CSRF: header tuỳ chỉnh + body JSON + `SameSite=Strict`; API không bật CORS nên trang khác origin không gửi được header này.
+- Refresh lỗi tạm thời (mạng, 429, 5xx) không phải đăng xuất: web thử lại rồi hiện nút "Thử lại", giữ nguyên URL.
+
 Thông điệp đăng nhập/refresh sai luôn là `"Invalid credentials or refresh token."`, không phân biệt email sai hay mật khẩu sai.
 
 ## 2. Claim và role
@@ -43,7 +54,7 @@ Quy ước truy cập dữ liệu của người khác (học viên xem dữ li�
 | Endpoint | Ẩn danh | Student | Teacher | Staff | Admin |
 |---|---|---|---|---|---|
 | `POST /api/identity/auth/login`, `refresh` | Có | Có | Có | Có | Có |
-| `POST /api/identity/auth/logout`, `change-password` | 401 | Có | Có | Có | Có |
+| `POST /api/identity/auth/logout`, `change-password` | 401 (`logout` chế độ cookie: theo cookie) | Có | Có | Có | Có |
 | `POST /api/identity/users` | 401 | 403 | 403 | Có | Có |
 | `GET /api/identity/me`, `PUT /api/identity/me` | 401 | Chính mình | Chính mình | Chính mình | Chính mình |
 | `POST /api/identity/users/republish` | 401 | 403 | 403 | 403 | Có |

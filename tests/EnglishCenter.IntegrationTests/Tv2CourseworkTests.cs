@@ -786,6 +786,40 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MissedPreview_PagesEqualDeadlinesWithoutRepeats()
+    {
+        await Enroll();
+        var ids = new HashSet<Guid>();
+        for (var i = 0; i < 3; i++)
+            ids.Add((await CreateAssignment($"Đối soát {i}")).GetProperty("id").GetGuid());
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AcademicDbContext>();
+            var due = DateTimeOffset.UtcNow.AddHours(-1);
+            foreach (var item in await db.Assignments.Where(x => ids.Contains(x.Id)).ToListAsync())
+                db.Entry(item).Property(x => x.ClosesAtUtc).CurrentValue = due;
+            await db.SaveChangesAsync();
+        }
+        await As("staff");
+        const string path = "/api/academic/assignments/missed-preview?pageSize=1";
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync(path + "&cursor=invalid")).StatusCode);
+        string? cursor = null;
+        string? checkedAt = null;
+        foreach (var expected in ids.Order())
+        {
+            var page = await client.GetFromJsonAsync<JsonElement>(cursor is null ? path : path + "&cursor=" + Uri.EscapeDataString(cursor));
+            var row = Assert.Single(page.GetProperty("items").EnumerateArray());
+            Assert.Equal(expected, row.GetProperty("assignmentId").GetGuid());
+            checkedAt ??= page.GetProperty("checkedAtUtc").GetString();
+            Assert.Equal(checkedAt, page.GetProperty("checkedAtUtc").GetString());
+            cursor = page.GetProperty("nextCursor").GetString();
+            Assert.Equal(expected != ids.Max(), page.GetProperty("hasMore").GetBoolean());
+            Assert.Equal(expected == ids.Max(), cursor is null);
+        }
+        Assert.Empty(factory.Missed);
+    }
+
+    [Fact]
     public async Task Practice_TeacherAndStaffManage_StudentsWithClassAccessRead()
     {
         var membership = await Enroll();

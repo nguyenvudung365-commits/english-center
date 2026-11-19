@@ -38,7 +38,7 @@ public sealed class IdentityDbContext : DbContext
         var sessions = modelBuilder.Entity<RefreshSession>();
         sessions.ToTable("refresh_sessions");
         sessions.HasKey(x => x.Id);
-        sessions.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
+        sessions.Property(x => x.TokenHash).HasMaxLength(64).IsRequired().IsConcurrencyToken();
         sessions.Property(x => x.RevokedAt).IsConcurrencyToken();
         sessions.HasIndex(x => x.TokenHash).IsUnique();
         sessions.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);

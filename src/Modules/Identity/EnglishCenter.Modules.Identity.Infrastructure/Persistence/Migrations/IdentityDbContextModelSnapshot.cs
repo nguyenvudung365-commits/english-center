@@ -23,7 +23,7 @@ namespace EnglishCenter.Modules.Identity.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.HasSequence<long>("student_code_sequence", "identity")
+            modelBuilder.HasSequence("student_code_sequence", "identity")
                 .HasMin(1L)
                 .HasMax(999999L);
 
@@ -41,6 +41,7 @@ namespace EnglishCenter.Modules.Identity.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("TokenHash")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
@@ -64,11 +65,11 @@ namespace EnglishCenter.Modules.Identity.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<Guid?>("AvatarFileId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Email")
                         .IsRequired()
@@ -103,10 +104,6 @@ namespace EnglishCenter.Modules.Identity.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint")
                         .HasDefaultValue(0L);
 
-                    b.Property<string>("StudentCode")
-                        .HasMaxLength(11)
-                        .HasColumnType("character varying(11)");
-
                     b.Property<Guid>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("uuid");
@@ -115,6 +112,10 @@ namespace EnglishCenter.Modules.Identity.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<string>("StudentCode")
+                        .HasMaxLength(11)
+                        .HasColumnType("character varying(11)");
 
                     b.HasKey("Id");
 
@@ -125,8 +126,10 @@ namespace EnglishCenter.Modules.Identity.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasFilter("\"StudentCode\" IS NOT NULL");
 
-                    b.ToTable("users", "identity", t => t.HasCheckConstraint("ck_users_student_code",
-                        "(\"Role\" = 'Student' AND \"StudentCode\" IS NOT NULL AND \"StudentCode\" ~ '^HV[0-9]{6}-[0-9]{2}$' AND substring(\"StudentCode\" from 3 for 6) <> '000000' AND right(\"StudentCode\", 2) = to_char(\"CreatedAt\" AT TIME ZONE 'UTC', 'YY')) OR (\"Role\" <> 'Student' AND \"StudentCode\" IS NULL)"));
+                    b.ToTable("users", "identity", t =>
+                        {
+                            t.HasCheckConstraint("ck_users_student_code", "(\"Role\" = 'Student' AND \"StudentCode\" IS NOT NULL AND \"StudentCode\" ~ '^HV[0-9]{6}-[0-9]{2}$' AND substring(\"StudentCode\" from 3 for 6) <> '000000' AND right(\"StudentCode\", 2) = to_char(\"CreatedAt\" AT TIME ZONE 'UTC', 'YY')) OR (\"Role\" <> 'Student' AND \"StudentCode\" IS NULL)");
+                        });
                 });
 
             modelBuilder.Entity("EnglishCenter.Modules.Identity.Domain.Users.RefreshSession", b =>

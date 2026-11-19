@@ -7,4 +7,4 @@ public sealed record SessionRangeQuery(DateTimeOffset? FromUtc, DateTimeOffset? 
 
 public sealed record SessionResponse(Guid Id, Guid ClassId, string ClassCode, string ClassName, Guid TeacherId,
     string TeacherName, string Unit, string Lesson, IReadOnlyList<string> Skills, string SessionType, string? ExamSlot,
-    DateTimeOffset StartsAtUtc, DateTimeOffset EndsAtUtc, DateTimeOffset CreatedAtUtc);
+    DateTimeOffset StartsAtUtc, DateTimeOffset EndsAtUtc, DateTimeOffset CreatedAtUtc, int Revision, bool IsCancelled);

@@ -18,7 +18,10 @@ public sealed record ClassResponse(Guid Id, string Code, string Name, Guid Cours
     string ClassType, DateOnly StartDate, DateOnly EndDate, int MaxStudents, decimal TuitionFee, Guid TeacherId,
     string TeacherName, string Status, DateTimeOffset CreatedAt);
 
-public sealed record CourseResponse(Guid Id, string Code, string Name, string? Description);
+public sealed record CourseResponse(Guid Id, string Code, string Name, string? Description, bool IsRetired = false);
+public sealed record WriteCourseRequest([Required, MaxLength(50)] string Code, [Required, MaxLength(200)] string Name,
+    [MaxLength(2000)] string? Description);
+public sealed record RetireCourseRequest([Required] bool? IsRetired);
 
 public sealed record TeacherResponse(Guid Id, string FullName, string Email);
 

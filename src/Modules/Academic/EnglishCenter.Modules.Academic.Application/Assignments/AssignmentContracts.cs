@@ -36,7 +36,8 @@ public sealed record MissedPreviewStudent(Guid StudentId, string? StudentName, s
 public sealed record MissedPreviewAssignment(Guid AssignmentId, Guid ClassId, string Title, DateTimeOffset ClosesAtUtc,
     int Pending, int Submitted, int Exempted, IReadOnlyList<MissedPreviewStudent> Missed);
 public sealed record MissedPreviewResponse(DateTimeOffset CheckedAtUtc, int Assignments, int Submitted, int Missed, int Exempted,
-    bool HasMore, IReadOnlyList<MissedPreviewAssignment> Items);
+    bool HasMore, IReadOnlyList<MissedPreviewAssignment> Items, string? NextCursor);
+public sealed record MissedPreviewPosition(DateTimeOffset ClosesAtUtc, Guid AssignmentId);
 public sealed record ReplayEventsResponse(int Published, int Graded, int Missed);
 public sealed record PageResponse<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);
 public sealed record FileDownloadResponse(Uri Url, DateTimeOffset ExpiresAt);
@@ -70,7 +71,8 @@ public interface IAssignmentStore
     Task<IReadOnlyList<SubmissionGrade>> UnsentGradesAsync(int max, CancellationToken ct);
     Task<IReadOnlyList<AssignmentRecipient>> UnsentMissedAsync(int max, CancellationToken ct);
     // Bài đã công bố (không legacy), chưa chốt nghĩa vụ, có hạn nộp <= dueBy; hạn sớm nhất trước.
-    Task<IReadOnlyList<Assignment>> DueUnresolvedAsync(DateTimeOffset dueBy, int max, CancellationToken ct);
+    Task<IReadOnlyList<Assignment>> DueUnresolvedAsync(DateTimeOffset dueBy, int max, CancellationToken ct,
+        MissedPreviewPosition? after = null, bool readOnly = false);
     void Add(Assignment item);
     void Add(Submission item);
     void Add(SubmissionGrade item);

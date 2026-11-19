@@ -25,6 +25,18 @@ public sealed class SessionsController(SessionService sessions, ClassAccess acce
     [HttpGet("{id:guid}")]
     public Task<SessionResponse> Get(Guid id, CancellationToken ct) => sessions.GetAsync(id, ct);
 
+    [HttpPut("{id:guid}"), Authorize(Roles = AcademicRoles.Managers)]
+    public Task<SessionResponse> Update(Guid id, CreateSessionBody body, CancellationToken ct) =>
+        sessions.ChangeAsync(id, RequireRevision(body.ExpectedRevision), new(body.ClassId, body.StartsAtUtc, body.EndsAtUtc,
+            body.Unit, body.Lesson, body.Skills, body.SessionType, body.ExamSlot), ct);
+
+    [HttpPost("{id:guid}/cancel"), Authorize(Roles = AcademicRoles.Managers)]
+    public Task<SessionResponse> Cancel(Guid id, CancelSessionBody body, CancellationToken ct) =>
+        sessions.ChangeAsync(id, RequireRevision(body.ExpectedRevision), null, ct);
+
+    private static int RequireRevision(int? value) => value is >= 0 ? value.Value
+        : throw new AcademicFailure(400, "A non-negative expected revision is required.");
+
     [HttpGet]
     public async Task<IReadOnlyList<SessionResponse>> Range([FromQuery] string? fromUtc, [FromQuery] string? toUtc,
         [FromQuery] Guid? classId, CancellationToken ct)
@@ -44,7 +56,9 @@ public sealed record CreateSessionBody(
     [Required] [property: JsonConverter(typeof(ExplicitOffsetDateTimeConverter))] DateTimeOffset? StartsAtUtc,
     [Required] [property: JsonConverter(typeof(ExplicitOffsetDateTimeConverter))] DateTimeOffset? EndsAtUtc,
     [Required] string? Unit, [Required] string? Lesson, [Required] string[]? Skills,
-    [Required] string? SessionType, string? ExamSlot = null);
+    [Required] string? SessionType, string? ExamSlot = null, int? ExpectedRevision = null);
+
+public sealed record CancelSessionBody(int? ExpectedRevision);
 
 public sealed partial class ExplicitOffsetDateTimeConverter : JsonConverter<DateTimeOffset>
 {

@@ -183,5 +183,7 @@ public sealed class AttendanceServiceTests
         public Task<Page<AttendanceReplayAttempt>> ReplaysAsync(Guid attendanceId, PageQuery page, CancellationToken ct) => throw new NotSupportedException();
         public Task<IReadOnlyList<Session>> RangeAsync(DateTime fromUtc, DateTime toUtc, IReadOnlyCollection<Guid> visibleClassIds, CancellationToken ct) => throw new NotSupportedException();
         public Task CreateWithoutTeacherOverlapAsync(Session session, Guid teacherId, CancellationToken ct) => throw new NotSupportedException();
+        public Task<Session> ChangeAsync(Guid id, Guid classId, Guid teacherId, int expectedRevision, Session? replacement, CancellationToken ct) =>
+            throw new NotSupportedException();
     }
 }

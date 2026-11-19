@@ -226,12 +226,25 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
     /// Staff/Admin đối soát trước khi bật Academic:Coursework:ResolveMissed: tính trước ai sẽ bị chốt Missed/Exempted/Submitted
     /// cho các bài đã quá hạn mà chưa chốt. Chỉ đọc: không ghi kết quả, không phát event.
     /// </summary>
-    public async Task<MissedPreviewResponse> PreviewMissedAsync(CancellationToken ct)
+    public async Task<MissedPreviewResponse> PreviewMissedAsync(string? cursor, int pageSize, CancellationToken ct)
     {
         await access.EnsureActiveAsync(ct);
         if (!access.IsManager) throw new AcademicFailure(403, "Only staff reconcile coursework obligations.");
-        const int max = 100;
-        var preview = await reconciler.PreviewAsync(max, ct);
+        if (pageSize is < 1 or > 100) throw new AcademicFailure(400, "Page size must be between 1 and 100.");
+        var now = clock.GetUtcNow();
+        var checkedAt = now;
+        MissedPreviewPosition? after = null;
+        if (cursor is not null)
+        {
+            var parts = cursor.Length <= 80 ? cursor.Split(':') : [];
+            if (parts.Length != 3 || !long.TryParse(parts[0], out var cutoff) || !long.TryParse(parts[1], out var closes) ||
+                !Guid.TryParseExact(parts[2], "N", out var id) || id == Guid.Empty ||
+                cutoff < CourseworkReconciler.Grace.Ticks || cutoff > now.UtcTicks || closes < 0 || closes > cutoff - CourseworkReconciler.Grace.Ticks)
+                throw new AcademicFailure(400, "Invalid missed preview cursor.");
+            checkedAt = new DateTimeOffset(cutoff, TimeSpan.Zero);
+            after = new(new DateTimeOffset(closes, TimeSpan.Zero), id);
+        }
+        var (preview, hasMore) = await reconciler.PreviewAsync(checkedAt, after, pageSize, ct);
         var names = await StudentNamesAsync(students, preview.SelectMany(x => x.MissedStudentIds), ct);
         var items = preview.Select(x => new MissedPreviewAssignment(x.AssignmentId, x.ClassId, x.Title, x.ClosesAtUtc, x.Pending,
             x.Submitted, x.Exempted, x.MissedStudentIds.Select(id =>
@@ -239,8 +252,9 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
                 names.TryGetValue(id, out var name);
                 return new MissedPreviewStudent(id, name?.FullName, name?.StudentCode);
             }).ToList())).ToList();
-        return new(clock.GetUtcNow(), items.Count, items.Sum(x => x.Submitted), items.Sum(x => x.Missed.Count),
-            items.Sum(x => x.Exempted), items.Count == max, items);
+        var next = hasMore ? FormattableString.Invariant($"{checkedAt.UtcTicks}:{items[^1].ClosesAtUtc.UtcTicks}:{items[^1].AssignmentId:N}") : null;
+        return new(checkedAt, items.Count, items.Sum(x => x.Submitted), items.Sum(x => x.Missed.Count),
+            items.Sum(x => x.Exempted), hasMore, items, next);
     }
 
     // US-22: học viên xem bài/điểm của mình qua mọi lớp còn quyền, có lọc/tìm kiếm/phân trang.

@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+ARG VITE_SUPPORT_ZALO_URL
 RUN npm test && npm run build
 
 FROM nginxinc/nginx-unprivileged:1.28-alpine

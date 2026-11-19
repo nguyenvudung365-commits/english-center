@@ -1,0 +1,5 @@
+services:
+  api:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Academic__Coursework__ResolveMissed: 'false'

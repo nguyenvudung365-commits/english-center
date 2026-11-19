@@ -83,6 +83,33 @@ public sealed class AcademicClassTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Courses_RetirementPreservesExistingClassesAndBlocksNewOnes()
+    {
+        const string path = "/api/academic/courses";
+        var input = new { code = " demo-101 ", name = "Demo course", description = "Intro" };
+        Authorize(await Login(Roles.Teacher));
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.PostAsJsonAsync(path, input)).StatusCode);
+        Authorize(await Login(Roles.Staff));
+        var created = await _client.PostAsJsonAsync(path, input);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var course = (await created.Content.ReadFromJsonAsync<CourseResponse>())!;
+        Assert.Equal("DEMO-101", course.Code);
+        Assert.Equal(HttpStatusCode.Conflict, (await _client.PostAsJsonAsync(path, input)).StatusCode);
+        var taught = await _client.PostAsJsonAsync(ClassesUrl, Valid("COURSE-KEEP") with { CourseId = course.Id });
+        taught.EnsureSuccessStatusCode();
+        var updated = await _client.PutAsJsonAsync($"{path}/{course.Id}", input with { name = "Demo updated" });
+        updated.EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.OK, (await _client.PutAsJsonAsync($"{path}/{course.Id}/retirement", new { isRetired = true })).StatusCode);
+        Assert.DoesNotContain((await _client.GetFromJsonAsync<CourseResponse[]>(path))!, x => x.Id == course.Id);
+        Assert.Contains((await _client.GetFromJsonAsync<CourseResponse[]>(path + "?includeRetired=true"))!, x => x.Id == course.Id && x.IsRetired);
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.PostAsJsonAsync(ClassesUrl, Valid("COURSE-BLOCK") with { CourseId = course.Id })).StatusCode);
+        Assert.Equal("Demo updated", (await _client.GetFromJsonAsync<ClassResponse>(taught.Headers.Location))!.CourseName);
+        Assert.Equal(HttpStatusCode.OK, (await _client.PutAsJsonAsync($"{path}/{course.Id}/retirement", new { isRetired = false })).StatusCode);
+        Assert.Contains((await _client.GetFromJsonAsync<CourseResponse[]>(path))!, x => x.Id == course.Id && !x.IsRetired);
+        Assert.Equal(HttpStatusCode.Created, (await _client.PostAsJsonAsync(ClassesUrl, Valid("COURSE-REOPEN") with { CourseId = course.Id })).StatusCode);
+    }
+
+    [Fact]
     public async Task CreateClass_Returns201_PublishesClassCreated_AndCanBeReadBack()
     {
         Authorize(await Login(Roles.Staff));

@@ -96,6 +96,7 @@ public sealed class AcademicSchedulePostgresTests : IAsyncLifetime
         }
         Assert.Equal("academic.sessions", await ScalarAsync("SELECT to_regclass('academic.sessions')::text"));
         foreach (var table in tables) Assert.Equal(before[table], await TableSnapshotAsync(table));
+        Assert.Equal("0", await ScalarAsync("SELECT count(*)::text FROM academic.courses WHERE is_retired IS DISTINCT FROM false"));
         Assert.Equal("0", await ScalarAsync("SELECT count(*)::text FROM academic.sessions"));
     }
 
@@ -357,6 +358,7 @@ public sealed class AcademicSchedulePostgresTests : IAsyncLifetime
     // Cột do migration chấm điểm (tuần 5+) thêm vào; chỉ so sánh phần dữ liệu có từ trước nâng cấp.
     private static string AddedColumns(string table) => table switch
     {
+        "courses" => "'is_retired'",
         "assignments" => "'created_at','created_by','is_legacy','kind','lesson','obligations_resolved_at','published_at','published_by','published_event_sent_at','session_id','unit','updated_at','version'",
         "submissions" => "'feedback','grade_version','graded_by','score'",
         _ => "",

@@ -1,18 +1,54 @@
+using EnglishCenter.BuildingBlocks.EventBus;
 using EnglishCenter.BuildingBlocks.Security;
 using EnglishCenter.Modules.Academic.Application.Abstractions;
 using EnglishCenter.Modules.Academic.Application.Classes;
+using EnglishCenter.Modules.Academic.Contracts.IntegrationEvents;
 using EnglishCenter.Modules.Academic.Domain.Classes;
 using EnglishCenter.Modules.Academic.Domain.Sessions;
 using EnglishCenter.Modules.Identity.Contracts;
+using Microsoft.Extensions.Logging;
 
 namespace EnglishCenter.Modules.Academic.Application.Sessions;
 
 public sealed class SessionService(ISessionStore store, IAcademicStore classes, ClassAccess access,
-    IAccountAccess accounts, TimeProvider clock)
+    IAccountAccess accounts, TimeProvider clock, IEventBus events, ILogger<SessionService> log)
 {
     public async Task<SessionResponse> CreateAsync(CreateSessionRequest request, CancellationToken ct)
     {
         await access.RequireManagerAsync(ct);
+        var (session, item) = await ValidateScheduleAsync(request, ct);
+        await store.CreateWithoutTeacherOverlapAsync(session, item.TeacherId, ct);
+        var teacher = await classes.FindTeacherAsync(item.TeacherId, ct);
+        return Response(session, item, teacher?.FullName ?? string.Empty);
+    }
+
+    public async Task<SessionResponse> ChangeAsync(Guid id, int expectedRevision, CreateSessionRequest? request, CancellationToken ct)
+    {
+        await access.RequireManagerAsync(ct);
+        var existing = await store.FindAsync(id, ct) ?? throw new AcademicFailure(404, "Session not found.");
+        if (request is not null && request.ClassId != existing.ClassId)
+            throw Invalid(new() { [nameof(request.ClassId)] = ["The class of an existing session cannot change."] });
+        Session? replacement = null;
+        Class item;
+        if (request is not null) (replacement, item) = await ValidateScheduleAsync(request, ct);
+        else item = await classes.FindClassAsync(existing.ClassId, ct) ?? throw new AcademicFailure(404, "Class not found.");
+        var changed = await store.ChangeAsync(id, item.Id, item.TeacherId, expectedRevision, replacement, ct);
+        try
+        {
+            await events.PublishAsync(new SessionScheduleChangedIntegrationEvent(changed.Id, item.Id, item.TeacherId, changed.Revision, changed.IsCancelled),
+                ct, throwOnHandlerFailure: true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // shortcut: notifications are best effort after commit; use a durable outbox if delivery must be guaranteed.
+            log.LogError(ex, "Session {SessionId} revision {Revision} saved but notifications failed", changed.Id, changed.Revision);
+        }
+        var teacher = await classes.FindTeacherAsync(item.TeacherId, ct);
+        return Response(changed, item, teacher?.FullName ?? string.Empty);
+    }
+
+    private async Task<(Session Session, Class Item)> ValidateScheduleAsync(CreateSessionRequest request, CancellationToken ct)
+    {
         var errors = new Dictionary<string, string[]>();
         if (request.ClassId is null || request.ClassId == Guid.Empty) errors[nameof(request.ClassId)] = ["Class is required."];
         if (request.StartsAtUtc is null || request.StartsAtUtc.Value.UtcDateTime == default)
@@ -54,9 +90,7 @@ public sealed class SessionService(ISessionStore store, IAcademicStore classes, 
         var end = request.EndsAtUtc!.Value.UtcDateTime;
         SessionWindow.Validate(item, start, end);
         var session = Session.Create(item.Id, request.Unit!, request.Lesson!, skills, type, slot, start, end, clock.GetUtcNow().UtcDateTime);
-        await store.CreateWithoutTeacherOverlapAsync(session, item.TeacherId, ct);
-        var teacher = await classes.FindTeacherAsync(item.TeacherId, ct);
-        return Response(session, item, teacher?.FullName ?? string.Empty);
+        return (session, item);
     }
 
     public async Task<SessionResponse> GetAsync(Guid id, CancellationToken ct)
@@ -102,7 +136,7 @@ public sealed class SessionService(ISessionStore store, IAcademicStore classes, 
     private static SessionResponse Response(Session session, Class item, string teacherName) =>
         new(session.Id, item.Id, item.Code, item.Name, item.TeacherId, teacherName, session.Unit, session.Lesson,
             Enum.GetValues<SessionSkills>().Where(x => (session.Skills & x) != 0).Select(x => x.ToString()).ToArray(),
-            session.SessionType.ToString(), session.ExamSlot, Utc(session.StartsAtUtc), Utc(session.EndsAtUtc), Utc(session.CreatedAtUtc));
+            session.SessionType.ToString(), session.ExamSlot, Utc(session.StartsAtUtc), Utc(session.EndsAtUtc), Utc(session.CreatedAtUtc), session.Revision, session.IsCancelled);
 
     // SQLite materializes DateTime with Unspecified kind; these columns always contain UTC.
     private static DateTimeOffset Utc(DateTime value) => new(DateTime.SpecifyKind(value, DateTimeKind.Utc));

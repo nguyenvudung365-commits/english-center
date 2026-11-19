@@ -17,6 +17,26 @@ public sealed class Session
     public DateTime StartsAtUtc { get; private set; }
     public DateTime EndsAtUtc { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
+    public int Revision { get; private set; }
+    public bool IsCancelled { get; private set; }
+
+    public void ApplySchedule(Session validated)
+    {
+        Unit = validated.Unit;
+        Lesson = validated.Lesson;
+        Skills = validated.Skills;
+        SessionType = validated.SessionType;
+        ExamSlot = validated.ExamSlot;
+        StartsAtUtc = validated.StartsAtUtc;
+        EndsAtUtc = validated.EndsAtUtc;
+        Revision++;
+    }
+
+    public void Cancel()
+    {
+        IsCancelled = true;
+        Revision++;
+    }
 
     public static Session Create(Guid classId, string unit, string lesson, SessionSkills skills,
         SessionType sessionType, string? examSlot, DateTime startsAtUtc, DateTime endsAtUtc, DateTime createdAtUtc)

@@ -71,6 +71,44 @@ public sealed class IdentityProfileTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Admin_ManagesTeacherProfileAndRevokesRefreshSessionsOnLock()
+    {
+        const string path = "/api/identity/users/teachers";
+        await Login(Roles.Staff);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(path)).StatusCode);
+
+        await Login(Roles.Teacher);
+        var teacherToken = client.DefaultRequestHeaders.Authorization;
+        var tokens = (await (await client.PostAsJsonAsync("/api/identity/auth/login",
+            new LoginRequest("Teacher@example.test", Password))).Content.ReadFromJsonAsync<TokenResponse>())!;
+        await Login(Roles.Admin);
+        var teacher = Assert.Single((await client.GetFromJsonAsync<ManagedTeacher[]>(path))!);
+        var url = $"{path}/{teacher.Id}";
+        var updated = await client.PutAsJsonAsync(url, new UpdateTeacherRequest("Managed teacher", "Teacher@example.test", "0900000000", teacher.Revision));
+        updated.EnsureSuccessStatusCode();
+        var current = (await updated.Content.ReadFromJsonAsync<ManagedTeacher>())!;
+        Assert.Equal("Managed teacher", current.FullName);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var academic = scope.ServiceProvider.GetRequiredService<AcademicDbContext>();
+            Assert.Equal("Managed teacher", (await academic.Teachers.SingleAsync(x => x.Id == teacher.Id)).FullName);
+        }
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PutAsJsonAsync(url + "/lock", new TeacherLockRequest(true, teacher.Revision))).StatusCode);
+        var result = await client.PutAsJsonAsync(url + "/lock", new TeacherLockRequest(true, current.Revision));
+        result.EnsureSuccessStatusCode();
+        var locked = (await result.Content.ReadFromJsonAsync<ManagedTeacher>())!;
+        Assert.True(locked.IsLocked);
+        var admin = client.DefaultRequestHeaders.Authorization;
+        client.DefaultRequestHeaders.Authorization = teacherToken;
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/identity/me")).StatusCode);
+        client.DefaultRequestHeaders.Authorization = admin;
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(url + "/lock", new TeacherLockRequest(false, locked.Revision))).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/api/identity/auth/refresh", new RefreshRequest(tokens.RefreshToken))).StatusCode);
+        await Login(Roles.Teacher);
+        Assert.Equal("Managed teacher", (await Profile()).GetProperty("fullName").GetString());
+    }
+
+    [Fact]
     public async Task Anonymous_CannotReadOrWriteProfile()
     {
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/identity/me")).StatusCode);

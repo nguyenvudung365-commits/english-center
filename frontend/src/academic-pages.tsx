@@ -7,8 +7,11 @@ import {
     getClass,
     isAcademicId,
     listCourses,
+    listManagedCourses,
     listClasses,
     listTeachers,
+    saveCourse,
+    setCourseRetired,
     validateClassDraft,
     type ClassDraft,
     type ClassQuery,
@@ -588,34 +591,87 @@ export function ClassCreate() {
         </>
     );
 }
-export function Catalog({ kind }: { kind: "courses" | "teachers" }) {
-    const courses = kind === "courses";
-    const [load] = useState<
-        () => Promise<
-            import("./academic").Course[] | import("./academic").Teacher[]
-        >
-    >(() => (courses ? listCourses : listTeachers));
+export function CourseManagement() {
+    const result = useRead(listManagedCourses);
+    const [search, setSearch] = useState("");
+    const [draft, setDraft] = useState<{ id?: string; code: string; name: string; description: string | null } | null>(null);
+    const [pending, setPending] = useState(false);
+    const [error, setError] = useState<unknown>();
+    const [notice, setNotice] = useState("");
+    const lock = useRef(false);
+    const rows = result.data?.filter(x => `${x.code} ${x.name} ${x.description ?? ""}`.toLocaleLowerCase("vi").includes(search.trim().toLocaleLowerCase("vi")));
+
+    async function write(action: () => Promise<unknown>, message: string) {
+        if (lock.current) return;
+        lock.current = true;
+        setPending(true); setError(null); setNotice("");
+        try {
+            await action();
+            setDraft(null); setNotice(message); result.retry();
+        } catch (failure) { setError(failure); }
+        finally { lock.current = false; setPending(false); }
+    }
+
+    return <>
+        <PageHeading title="Danh mục khóa học" />
+        <section className="panel">
+            <label htmlFor="course-search">Tìm mã, tên hoặc mô tả khóa học</label>
+            <input id="course-search" type="search" value={search} onChange={e => setSearch(e.target.value)} />
+            <button className="primary" disabled={pending} onClick={() => { setError(null); setDraft({ code: "", name: "", description: "" }); }}>Thêm khóa học</button>
+            {result.loading && <p role="status">Đang tải khóa học…</p>}
+            <ErrorMessage error={result.error} />
+            {result.error ? <button className="secondary" onClick={result.retry}>Thử tải lại</button> : null}
+            {rows?.length === 0 && <p role="status">Không có khóa học phù hợp.</p>}
+            {!!rows?.length && <ul className="catalog-list">{rows.map(x => <li key={x.id}>
+                <span className="pill">{x.code} · {x.isRetired ? "Ngừng mở lớp" : "Đang hoạt động"}</span>
+                <h2>{x.name}</h2><p>{x.description ?? "Chưa có mô tả."}</p>
+                <div className="academic-actions">
+                    <button className="secondary" disabled={pending} onClick={() => { setError(null); setDraft(x); }}>Sửa<span className="sr-only"> {x.name}</span></button>
+                    <button className="secondary" disabled={pending || draft !== null} onClick={() => {
+                        if (!x.isRetired && !window.confirm(`Ngừng mở lớp mới cho ${x.name}? Các lớp hiện có vẫn được giữ.`)) return;
+                        void write(() => setCourseRetired(x.id, !x.isRetired), x.isRetired ? "Đã kích hoạt lại khóa học." : "Đã ngừng mở lớp mới cho khóa học.");
+                    }}>{x.isRetired ? "Kích hoạt lại" : "Ngừng mở lớp"}<span className="sr-only"> {x.name}</span></button>
+                </div>
+            </li>)}</ul>}
+        </section>
+        {draft && <section className="panel"><h2>{draft.id ? "Sửa khóa học" : "Thêm khóa học"}</h2>
+            <form className="academic-form" onSubmit={e => {
+                e.preventDefault();
+                const { id, code, name, description } = draft;
+                void write(() => saveCourse({ code, name, description }, id), "Đã lưu khóa học.");
+            }}>
+                <fieldset disabled={pending}>
+                    <label htmlFor="course-code">Mã khóa học</label>
+                    <input id="course-code" required maxLength={50} value={draft.code} onChange={e => setDraft({ ...draft, code: e.target.value })} />
+                    <label htmlFor="course-name">Tên khóa học</label>
+                    <input id="course-name" required maxLength={200} value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} />
+                    <label htmlFor="course-description">Mô tả</label>
+                    <textarea id="course-description" maxLength={2000} value={draft.description ?? ""} onChange={e => setDraft({ ...draft, description: e.target.value })} />
+                    <button className="primary">Lưu khóa học</button>{" "}
+                    <button className="secondary" type="button" onClick={() => { setDraft(null); setError(null); }}>Đóng biểu mẫu</button>
+                </fieldset>
+            </form>
+        </section>}
+        <ErrorMessage error={error} />
+        {notice && <p className="notice" role="status">{notice}</p>}
+    </>;
+}
+
+export function TeacherCatalog() {
+    const load = listTeachers;
     const result = useRead(load);
     const [search, setSearch] = useState("");
     const filtered = result.data?.filter((item) =>
-        ("code" in item
-            ? `${item.code} ${item.name} ${item.description ?? ""}`
-            : `${item.fullName} ${item.email}`
-        )
+        `${item.fullName} ${item.email}`
             .toLocaleLowerCase("vi")
             .includes(search.trim().toLocaleLowerCase("vi")),
     );
     return (
         <>
-            <PageHeading
-                title={courses ? "Danh mục khóa học" : "Danh mục giáo viên"}
-                subtitle="Danh mục chỉ đọc từ Academic. Tìm kiếm trên dữ liệu đã tải; chưa có API thêm, sửa hoặc xóa."
-            />
+            <PageHeading title="Danh mục giáo viên" />
             <section className="panel">
                 <label htmlFor="catalog-search">
-                    {courses
-                        ? "Tìm mã, tên hoặc mô tả khóa học"
-                        : "Tìm tên hoặc email giáo viên"}
+                    Tìm tên hoặc email giáo viên
                 </label>
                 <input
                     id="catalog-search"
@@ -645,23 +701,8 @@ export function Catalog({ kind }: { kind: "courses" | "teachers" }) {
                         <ul className="catalog-list">
                             {filtered.map((item) => (
                                 <li key={item.id}>
-                                    {"code" in item ? (
-                                        <>
-                                            <span className="pill">
-                                                {item.code}
-                                            </span>
-                                            <h2>{item.name}</h2>
-                                            <p>
-                                                {item.description ??
-                                                    "Chưa có mô tả."}
-                                            </p>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <h2>{item.fullName}</h2>
-                                            <p>{item.email}</p>
-                                        </>
-                                    )}
+                                    <h2>{item.fullName}</h2>
+                                    <p>{item.email}</p>
                                     <p className="id muted">ID: {item.id}</p>
                                 </li>
                             ))}

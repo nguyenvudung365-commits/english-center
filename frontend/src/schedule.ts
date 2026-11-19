@@ -17,6 +17,8 @@ export type ScheduledSession = {
     startsAtUtc: string;
     endsAtUtc: string;
     createdAtUtc: string;
+    revision: number;
+    isCancelled: boolean;
 };
 export type SessionDraft = {
     classId: string;
@@ -144,11 +146,18 @@ export async function listSessions(query: { fromUtc: string; toUtc: string; clas
     if (query.classId !== undefined) parameters.set("classId", query.classId);
     return api<ScheduledSession[]>(`/academic/sessions?${parameters}`);
 }
-export async function createSession(draft: SessionDraft): Promise<ScheduledSession> {
+export function sessionLocalTime(utc: string) {
+    return new Date(instantMilliseconds(utc) + offsetMs).toISOString().slice(0, 16);
+}
+
+export async function saveSession(draft: SessionDraft, existing?: ScheduledSession): Promise<ScheduledSession> {
     const errors = validateSessionDraft(draft);
     if (Object.keys(errors).length) throw new ApiError(400, "Vui lòng kiểm tra thông tin buổi học.", errors);
-    return api<ScheduledSession>("/academic/sessions", {
-        method: "POST",
+    if (existing && (!isAcademicId(existing.id) || existing.classId !== draft.classId))
+        throw new ApiError(400, "Không thể đổi lớp của buổi học.");
+    const instant = (local: string, previous?: string) => previous && sessionLocalTime(previous) === local ? previous : vietnamLocalToUtc(local);
+    return api<ScheduledSession>(existing ? `/academic/sessions/${existing.id}` : "/academic/sessions", {
+        method: existing ? "PUT" : "POST",
         body: JSON.stringify({
             classId: draft.classId,
             unit: draft.unit.trim(),
@@ -156,8 +165,18 @@ export async function createSession(draft: SessionDraft): Promise<ScheduledSessi
             skills: sessionSkills.filter((skill) => draft.skills.includes(skill)),
             sessionType: draft.sessionType,
             examSlot: draft.examSlot.trim() || null,
-            startsAtUtc: vietnamLocalToUtc(draft.startsAtLocal),
-            endsAtUtc: vietnamLocalToUtc(draft.endsAtLocal),
+            startsAtUtc: instant(draft.startsAtLocal, existing?.startsAtUtc),
+            endsAtUtc: instant(draft.endsAtLocal, existing?.endsAtUtc),
+            expectedRevision: existing?.revision,
         }),
+    });
+}
+
+export const createSession = (draft: SessionDraft) => saveSession(draft);
+
+export async function cancelSession(item: ScheduledSession) {
+    if (!isAcademicId(item.id)) throw new ApiError(400, "Mã buổi học không hợp lệ.");
+    return api<ScheduledSession>(`/academic/sessions/${item.id}/cancel`, {
+        method: "POST", body: JSON.stringify({ expectedRevision: item.revision }),
     });
 }

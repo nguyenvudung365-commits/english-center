@@ -7,10 +7,11 @@ public sealed class AttendanceSnapshot
     public Guid EnrollmentId { get; private set; }
     public string Status { get; private set; } = "";
     public DateTime RecordedAt { get; private set; }
+    public int Revision { get; private set; }
     private AttendanceSnapshot() { }
-    public AttendanceSnapshot(Guid session, Guid student, Guid enrollment, string status, DateTime at)
-    { SessionId = session; StudentId = student; EnrollmentId = enrollment; Set(status, at); }
-    public void Set(string status, DateTime at) { Status = status; RecordedAt = at; }
+    public AttendanceSnapshot(Guid session, Guid student, Guid enrollment, string status, DateTime at, int revision)
+    { SessionId = session; StudentId = student; EnrollmentId = enrollment; Set(status, at, revision); }
+    public void Set(string status, DateTime at, int revision) { Status = status; RecordedAt = at; Revision = revision; }
 }
 
 // Một bài chỉ được Academic kết luận là bỏ sau khi hết hạn nộp/nộp lại.

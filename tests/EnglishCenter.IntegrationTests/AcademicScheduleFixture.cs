@@ -84,7 +84,10 @@ internal sealed class AcademicScheduleFixture(string? postgres = null, IIntercep
         }
         await identity.SaveChangesAsync();
         var course = Course.Create(Guid.NewGuid(), "SCHEDULE", "Synthetic schedule course");
-        academic.Courses.Add(course);
+        if (academicMigration is null) academic.Courses.Add(course);
+        else
+            // The baseline migration test seeds a schema without is_retired.
+            await academic.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO academic.courses (id, code, name) VALUES ({course.Id}, {course.Code}, {course.Name})");
         var classes = new[] { NewClass("A-01", "Lớp Việt 🗓", Users["teacher"]),
             NewClass("A-02", "Second class", Users["teacher"]), NewClass("B-01", "Other class", Users["other-teacher"]) };
         First = classes[0].Id; Second = classes[1].Id; Other = classes[2].Id;

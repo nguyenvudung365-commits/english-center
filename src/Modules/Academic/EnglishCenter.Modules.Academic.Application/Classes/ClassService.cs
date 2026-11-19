@@ -18,6 +18,7 @@ public sealed partial class ClassService(IAcademicStore store, IEventBus events,
 
         var course = await store.FindCourseAsync(request.CourseId!.Value, ct);
         if (course is null) errors[nameof(request.CourseId)] = ["Course does not exist."];
+        else if (course.IsRetired) errors[nameof(request.CourseId)] = ["Course is retired."];
         var teacher = await store.FindTeacherAsync(request.TeacherId!.Value, ct);
         if (teacher is null) errors[nameof(request.TeacherId)] = ["Teacher does not exist or is not synchronized to Academic yet."];
         if (errors.Count > 0) throw Invalid(errors);
@@ -27,10 +28,9 @@ public sealed partial class ClassService(IAcademicStore store, IEventBus events,
 
         var created = Class.Create(code, request.Name, course!.Id, classType, request.StartDate!.Value, request.EndDate!.Value,
             request.MaxStudents!.Value, request.TuitionFee!.Value, teacher!.Id, clock.GetUtcNow());
-        store.AddClass(created);
         try
         {
-            await store.SaveAsync(ct);
+            await store.SaveNewClassAsync(created, ct);
         }
         catch (AcademicFailure failure) when (failure.Status == 409)
         {
@@ -72,11 +72,46 @@ public sealed partial class ClassService(IAcademicStore store, IEventBus events,
         return ToResponse(found, course, teacher);
     }
 
-    public async Task<IReadOnlyList<CourseResponse>> CoursesAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<CourseResponse>> CoursesAsync(bool includeRetired, CancellationToken ct)
     {
         await access.RequireManagerAsync(ct);
-        return (await store.CoursesAsync(ct)).Select(x => new CourseResponse(x.Id, x.Code, x.Name, x.Description)).ToList();
+        return (await store.CoursesAsync(ct)).Where(x => includeRetired || !x.IsRetired).Select(CourseResponseOf).ToList();
     }
+
+    public async Task<CourseResponse> CourseAsync(Guid id, CancellationToken ct)
+    {
+        await access.RequireManagerAsync(ct);
+        return CourseResponseOf(await FindCourseAsync(id, ct));
+    }
+
+    public async Task<CourseResponse> SaveCourseAsync(Guid? id, WriteCourseRequest request, CancellationToken ct)
+    {
+        await access.RequireManagerAsync(ct);
+        var code = request.Code.Trim().ToUpperInvariant();
+        var errors = new Dictionary<string, string[]>();
+        if (code.Length is 0 or > Course.CodeMaxLength || !CodePattern().IsMatch(code)) errors[nameof(request.Code)] = ["Invalid course code."];
+        if (string.IsNullOrWhiteSpace(request.Name)) errors[nameof(request.Name)] = ["Course name is required."];
+        if (errors.Count > 0) throw Invalid(errors);
+        var course = id is { } value ? await FindCourseAsync(value, ct) : Course.Create(Guid.NewGuid(), code, request.Name, request.Description);
+        if (id is null) store.AddCourse(course);
+        else course.Update(code, request.Name, request.Description);
+        await store.SaveAsync(ct);
+        return CourseResponseOf(course);
+    }
+
+    public async Task<CourseResponse> RetireCourseAsync(Guid id, RetireCourseRequest request, CancellationToken ct)
+    {
+        await access.RequireManagerAsync(ct);
+        var course = await FindCourseAsync(id, ct);
+        course.SetRetired(request.IsRetired!.Value);
+        await store.SaveAsync(ct);
+        return CourseResponseOf(course);
+    }
+
+    private async Task<Course> FindCourseAsync(Guid id, CancellationToken ct) =>
+        await store.FindCourseAsync(id, ct) ?? throw new AcademicFailure(404, "Course not found.");
+
+    private static CourseResponse CourseResponseOf(Course course) => new(course.Id, course.Code, course.Name, course.Description, course.IsRetired);
 
     public async Task<IReadOnlyList<TeacherResponse>> TeachersAsync(CancellationToken ct)
     {

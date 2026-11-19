@@ -93,10 +93,12 @@ public sealed class CourseworkReconciler(IAssignmentStore store, IEnrollmentAcce
     /// Đối soát chỉ đọc (dùng trước khi bật ResolveMissed): áp dụng đúng quy tắc chốt của worker cho các bài đã quá hạn
     /// mà chưa chốt, nhưng KHÔNG ghi kết quả và KHÔNG phát event.
     /// </summary>
-    public async Task<IReadOnlyList<MissedPreviewItem>> PreviewAsync(int max, CancellationToken ct)
+    public async Task<(IReadOnlyList<MissedPreviewItem> Items, bool HasMore)> PreviewAsync(DateTimeOffset checkedAt,
+        MissedPreviewPosition? after, int max, CancellationToken ct)
     {
         var result = new List<MissedPreviewItem>();
-        foreach (var item in await store.DueUnresolvedAsync(clock.GetUtcNow() - Grace, max, ct))
+        var due = await store.DueUnresolvedAsync(checkedAt - Grace, max + 1, ct, after, readOnly: true);
+        foreach (var item in due.Take(max))
         {
             var submissions = (await store.AllSubmissionsAsync(item.Id, ct)).ToDictionary(x => x.StudentId);
             var pending = (await store.RecipientsAsync(item.Id, ct)).Where(x => x.Outcome == ObligationOutcome.Pending).ToList();
@@ -111,7 +113,7 @@ public sealed class CourseworkReconciler(IAssignmentStore store, IEnrollmentAcce
                 }
             result.Add(new(item.Id, item.ClassId, item.Title, item.ClosesAtUtc, pending.Count, submitted, exempted, missed));
         }
-        return result;
+        return (result, due.Count > max);
     }
 
     // Chốt toàn bộ nghĩa vụ của một bài trong một transaction; trạng thái cuối không bị mở lại.

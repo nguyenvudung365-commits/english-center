@@ -22,6 +22,7 @@ public static class DependencyInjection
         services.AddIntegrationEventHandler<UserRegisteredIntegrationEvent, UserRegisteredHandler>();
         services.AddIntegrationEventHandler<ClassCreatedIntegrationEvent, ClassCreatedHandler>();
         services.AddIntegrationEventHandler<AttendanceRecordedIntegrationEvent, AttendanceRecordedHandler>();
+        services.AddIntegrationEventHandler<AttendanceRevisionRecordedIntegrationEvent, AttendanceRecordedHandler>();
         services.AddIntegrationEventHandler<AssignmentMissedIntegrationEvent, AssignmentMissedHandler>();
         services.AddIntegrationEventHandler<UserRegisteredIntegrationEvent, PlacementTeacherHandler>();
         return services;

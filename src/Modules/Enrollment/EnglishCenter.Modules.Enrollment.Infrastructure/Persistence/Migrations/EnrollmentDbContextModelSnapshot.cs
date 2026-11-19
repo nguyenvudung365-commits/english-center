@@ -118,6 +118,10 @@ namespace EnglishCenter.Modules.Enrollment.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("recorded_at");
 
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer")
+                        .HasColumnName("revision");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(30)
