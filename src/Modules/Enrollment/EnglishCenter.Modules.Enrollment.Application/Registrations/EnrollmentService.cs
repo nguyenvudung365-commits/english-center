@@ -1,5 +1,6 @@
 using EnglishCenter.BuildingBlocks.EventBus;
 using EnglishCenter.BuildingBlocks.Security;
+using EnglishCenter.Modules.Enrollment.Application.Monitoring;
 using EnglishCenter.Modules.Enrollment.Contracts.IntegrationEvents;
 using EnglishCenter.Modules.Enrollment.Domain.Registrations;
 using EnglishCenter.Modules.Identity.Contracts;
@@ -16,6 +17,8 @@ public sealed record EnrollRequest(Guid StudentId, Guid ClassId, int? MaxAbsence
 public sealed record EnrollmentResponse(Guid Id, Guid StudentId, Guid ClassId, string Status, DateTime EnrolledAtUtc,
     decimal TuitionFee, int MaxAbsences, int MaxLates, int MaxSkippedAssignments, bool IsActive = true);
 public sealed record EnrollmentStatisticsResponse(int CompletedClasses);
+public sealed record MyEnrollmentResponse(Guid Id, Guid ClassId, string ClassCode, DateOnly StartDate, DateOnly EndDate,
+    string Status, DateTime EnrolledAtUtc, decimal TuitionFee, bool IsActive);
 
 public interface IEnrollmentStore
 {
@@ -28,6 +31,7 @@ public interface IEnrollmentStore
     Task<IReadOnlyList<Guid>> ListActiveStudentIdsAsync(Guid classId, CancellationToken ct);
     Task<Registration> SetActiveAsync(Guid id, bool active, CancellationToken ct);
     Task<int> CountCompletedClassesAsync(Guid studentId, DateOnly today, CancellationToken ct);
+    Task<PageResult<MyEnrollmentResponse>> ListMineAsync(Guid studentId, int page, int size, CancellationToken ct);
 }
 
 public sealed class EnrollmentService(IEnrollmentStore store, IEventBus events, TimeProvider clock,
@@ -85,6 +89,15 @@ public sealed class EnrollmentService(IEnrollmentStore store, IEventBus events, 
         if (current.Role != Roles.Student)
             throw new EnrollmentFailure(403, "Only students can view their personal statistics.");
         return new(await store.CountCompletedClassesAsync(studentId, LocalDate(clock.GetUtcNow()), ct));
+    }
+
+    public async Task<PageResult<MyEnrollmentResponse>> ListMineAsync(int page, int pageSize, CancellationToken ct)
+    {
+        var studentId = await EnsureReaderAsync(ct);
+        if (current.Role != Roles.Student)
+            throw new EnrollmentFailure(403, "Only students can view their personal enrollments.");
+        (page, pageSize) = MonitoringService.Pagination(page, pageSize);
+        return await store.ListMineAsync(studentId, page, pageSize, ct);
     }
 
     public async Task ReplayAsync(Guid id, CancellationToken ct)
