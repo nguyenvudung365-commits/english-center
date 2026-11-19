@@ -198,10 +198,6 @@ function Login({ notice }: { notice: string }) {
                             </>
                         ) : "Liên hệ giáo vụ để được hỗ trợ."}</span>
                     </p>
-                    <p className="muted small">
-                        Phiên được giữ khi tải lại trang và kết thúc khi bạn
-                        đăng xuất hoặc đóng trình duyệt.
-                    </p>
                 </div>
             </section>
         </main>

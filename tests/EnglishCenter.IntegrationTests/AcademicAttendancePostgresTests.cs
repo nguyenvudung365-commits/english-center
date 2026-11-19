@@ -77,19 +77,18 @@ public sealed class AcademicAttendancePostgresTests : IAsyncLifetime
         {
             var db = scope.ServiceProvider.GetRequiredService<AcademicDbContext>();
             var now = new DateTime(2027, 1, 1, 10, 0, 0, DateTimeKind.Utc);
-            db.Sessions.Add(Session.Create(fixture.Second, "Unit", "Preserved", SessionSkills.Listening,
-                SessionType.Regular, null, now, now.AddHours(1), now));
-            // Schema cũ chưa có cột chấm điểm: chèn thẳng bằng SQL thay vì model hiện tại.
+            // Seed only columns that exist at AddSessions, not columns in the current EF model.
             var (a, s, f) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-            await db.Database.ExecuteSqlRawAsync($"""
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO academic.sessions (id, class_id, unit, lesson, skills, session_type, starts_at_utc, ends_at_utc, created_at_utc)
+                VALUES ({Guid.NewGuid()}, {fixture.Second}, 'Unit', 'Preserved', {(int)SessionSkills.Listening}, 'Regular', {now}, {now.AddHours(1)}, {now});
                 INSERT INTO academic.assignments (id, class_id, title, description, opens_at_utc, closes_at_utc)
-                VALUES ('{a}', '{fixture.Second}', 'Preserved assignment', 'Synthetic', now(), now() + interval '1 day');
+                VALUES ({a}, {fixture.Second}, 'Preserved assignment', 'Synthetic', now(), now() + interval '1 day');
                 INSERT INTO academic.submissions (id, assignment_id, student_id, revision, submitted_at)
-                VALUES ('{s}', '{a}', '{fixture.Users["student"]}', '{Guid.NewGuid()}', now());
+                VALUES ({s}, {a}, {fixture.Users["student"]}, {Guid.NewGuid()}, now());
                 INSERT INTO academic.submission_files (id, submission_id, file_id, file_name, content_type, size_bytes)
-                VALUES ('{Guid.NewGuid()}', '{s}', '{f}', 'x.pdf', 'application/pdf', 12);
+                VALUES ({Guid.NewGuid()}, {s}, {f}, 'x.pdf', 'application/pdf', 12);
                 """);
-            await db.SaveChangesAsync();
         }
         var tables = new[] { "courses", "teachers", "classes", "class_students", "assignments", "submissions", "submission_files", "sessions" };
         var before = new Dictionary<string, string?>();
@@ -400,16 +399,18 @@ public sealed class AcademicAttendancePostgresTests : IAsyncLifetime
         return $"\"{entity.GetSchema()!.Replace("\"", "\"\"")}\".\"{entity.GetTableName()!.Replace("\"", "\"\"")}\"";
     }
 
-    // Cột do migration chấm điểm (tuần 5+) thêm vào; chỉ so sánh phần dữ liệu có từ trước nâng cấp.
+    // Chỉ so sánh các cột đã tồn tại ở migration AddSessions.
     private static string AddedColumns(string table) => table switch
     {
         "assignments" => "'created_at','created_by','is_legacy','kind','lesson','obligations_resolved_at','published_at','published_by','published_event_sent_at','session_id','unit','updated_at','version'",
         "submissions" => "'feedback','grade_version','graded_by','score'",
+        "sessions" => "'is_cancelled','revision'",
+        "courses" => "'is_retired'",
         _ => "",
     };
 
     private Task<string?> SnapshotAsync(string table) =>
-        ScalarAsync($"SELECT coalesce(jsonb_agg((row_to_json(t)::jsonb - ARRAY[{AddedColumns(table)}]::text[]) ORDER BY row_to_json(t)::text)::text,'[]') FROM academic.\"{table}\" t");
+        ScalarAsync($"SELECT coalesce(jsonb_agg(data ORDER BY data::text)::text,'[]') FROM (SELECT to_jsonb(t) - ARRAY[{AddedColumns(table)}]::text[] AS data FROM academic.\"{table}\" t) snapshot");
 
     private async Task<string?> ScalarAsync(string sql)
     {
