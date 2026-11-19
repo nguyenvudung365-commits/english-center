@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace EnglishCenter.Modules.Academic.Application.Assignments;
 
 public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess access, ISubmissionFileAccess media,
-    TimeProvider clock, SubmissionLimits limits, ISessionCatalog sessions, CourseworkEvents events, IStudentDisplayDirectory students,
+    IClassFileAccess classFiles, TimeProvider clock, SubmissionLimits limits, ISessionCatalog sessions, CourseworkEvents events, IStudentDisplayDirectory students,
     CourseworkReconciler reconciler, ILogger<AssignmentService> log)
 {
     private static readonly string[] SubmissionStatuses = ["NotSubmitted", "Submitted", "Graded", "Missed", "Exempted"];
@@ -33,9 +33,12 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
         var kind = ParseKind(request.Kind) ?? AssignmentKind.Homework;
         var (unit, lesson) = await SessionDefaultsAsync(request.ClassId, request.SessionId, request.Unit, request.Lesson, ct);
         CheckLabels(unit, lesson);
+        // Kiểm tra đề trước khi tạo gì: bài thi bắt buộc có đề, loại khác không được kèm đề.
+        if (kind == AssignmentKind.Exam && request.PromptFileId is null) throw PromptFailure("An exam needs a prompt PDF.");
         var now = clock.GetUtcNow();
         var item = Assignment.Create(request.ClassId, request.Title, request.Description ?? "", request.OpensAtUtc,
             request.ClosesAtUtc, kind, unit, lesson, request.SessionId, userId, now);
+        if (request.PromptFileId is { } prompt) await AttachPromptAsync(item, userId, prompt, ct);
         store.Add(item);
         var recipients = request.Publish == false ? -1 : await PublishCoreAsync(item, userId, now, ct);
         await store.SaveAsync(ct);
@@ -60,10 +63,15 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
             ? await SessionDefaultsAsync(item.ClassId, sessionId, request.Unit, request.Lesson, ct)
             : (request.Unit, request.Lesson);
         CheckLabels(unit, lesson);
+        Guid? newPrompt = request.PromptFileId is { } wanted && (wanted != item.PromptFileId || kind != item.Kind) ? wanted : null;
+        if (kind == AssignmentKind.Exam && newPrompt is null && (item.PromptFileId is null || kind != item.Kind)) throw PromptFailure("An exam needs a prompt PDF.");
+        // Bài đã công bố: từ chối trước khi tra cứu file mới để không lộ file của người khác qua mã lỗi.
+        if (newPrompt is not null && item.IsVisibleToStudents) throw new AcademicFailure(409, "Published exams cannot change their prompt.");
         try
         {
             item.Update(request.Title, request.Description ?? "", request.OpensAtUtc, request.ClosesAtUtc, kind, unit, lesson,
                 sessionId, clock.GetUtcNow());
+            if (newPrompt is { } prompt) await AttachPromptAsync(item, access.UserId(), prompt, ct);
         }
         catch (InvalidOperationException ex) { throw new AcademicFailure(409, ex.Message); }
         await store.SaveAsync(ct);
@@ -147,24 +155,27 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
         await access.AuthorizeAsync(assignment.ClassId, CourseworkClassAccess.Read, ct);
         EnsureVisible(assignment);
         CheckWindow(assignment);
-        var ids = request.FileIds;
-        if (ids is null || ids.Length < 1 || ids.Length > limits.MaxFiles || ids.Any(x => x == Guid.Empty) || ids.Distinct().Count() != ids.Length)
-            throw new AcademicFailure(400, $"Select 1–{limits.MaxFiles} distinct, nonempty file IDs.");
-        var confirmed = await media.GetConfirmedAsync(userId, ids, ct);
+        var answer = string.IsNullOrWhiteSpace(request.AnswerText) ? null : request.AnswerText.Trim();
+        if (request.AnswerText?.Length > Submission.AnswerMaxLength || (assignment.Kind == AssignmentKind.Exam && answer is not null))
+            throw new AcademicFailure(400, "Written answers are only available for practice and homework (up to 10000 characters).");
+        var ids = request.FileIds ?? [];
+        if ((ids.Length == 0 && answer is null) || ids.Length > limits.MaxFiles || ids.Any(x => x == Guid.Empty) || ids.Distinct().Count() != ids.Length)
+            throw new AcademicFailure(400, $"Provide an answer or select 1–{limits.MaxFiles} distinct, nonempty file IDs.");
+        var confirmed = ids.Length == 0 ? [] : await media.GetConfirmedAsync(userId, ids, ct);
         if (confirmed is null || confirmed.Count != ids.Length || !confirmed.Select(x => x.FileId).ToHashSet().SetEquals(ids) ||
             confirmed.Any(x => x.SizeBytes is <= 0 or > 20 * 1024 * 1024) || confirmed.Sum(x => x.SizeBytes) > limits.MaxTotalBytes)
             throw new AcademicFailure(400, "Files must be confirmed, owned by you, intended for submission and within size limits.");
         var item = await store.FindSubmissionAsync(assignmentId, userId, ct);
         if (item?.GradedAt is not null) throw new AcademicFailure(409, "Graded submissions cannot be replaced.");
         // Set equality makes a retry safe after a lost response, irrespective of attachment ordering.
-        if (item is not null && item.Files.Select(x => x.FileId).ToHashSet().SetEquals(ids)) return Response(item);
+        if (item is not null && item.AnswerText == answer && item.Files.Select(x => x.FileId).ToHashSet().SetEquals(ids)) return Response(item);
         if ((item is null && request.ExpectedRevision is not null) || (item is not null && request.ExpectedRevision != item.Revision))
-            throw new AcademicFailure(409, "Submission changed. Reload before replacing its files.");
+            throw new AcademicFailure(409, "Submission changed. Reload before replacing it.");
         if (item is null) { item = Submission.Create(assignmentId, userId); store.Add(item); }
         var snapshots = confirmed.Select(x => SubmissionFile.Create(item.Id, x.FileId, x.FileName, x.ContentType, x.SizeBytes)).ToList();
         // A single SaveChanges transaction persists the aggregate plus all attachments (or none).
         CheckWindow(assignment);
-        item.ReplaceFiles(snapshots, clock.GetUtcNow());
+        item.Replace(snapshots, answer, clock.GetUtcNow());
         await store.SaveAsync(ct); return Response(item);
     }
 
@@ -257,7 +268,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
             items.Sum(x => x.Exempted), hasMore, items, next);
     }
 
-    // US-22: học viên xem bài/điểm của mình qua mọi lớp còn quyền, có lọc/tìm kiếm/phân trang.
+    // Sau chuyển lớp chỉ trả kết quả bài đã nộp của chính học viên, không trả nội dung hay đề.
     public async Task<PageResponse<StudentAssignmentResponse>> StudentAssignmentsAsync(StudentAssignmentQuery query, CancellationToken ct)
     {
         var userId = await access.EnsureActiveAsync(ct);
@@ -280,6 +291,11 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
         }
         var now = clock.GetUtcNow();
         var assignments = (await store.ClassAssignmentsAsync(classIds, ct)).Where(x => x.IsVisibleToStudents).ToList();
+        var history = query.ClassId is null && submissionStatus is not ("NotSubmitted" or "Missed" or "Exempted")
+            ? await store.TransferredSubmissionAssignmentsAsync(userId, await access.TransferredClassIdsAsync(userId, ct), ct)
+            : [];
+        var historicalIds = history.Select(x => x.Id).ToHashSet();
+        assignments.AddRange(history.Where(x => x.IsVisibleToStudents));
         var ids = assignments.Select(x => x.Id).ToList();
         var submissions = (await store.StudentSubmissionsAsync(userId, ids, ct)).ToDictionary(x => x.AssignmentId);
         var obligations = (await store.StudentObligationsAsync(userId, ct)).ToDictionary(x => x.AssignmentId);
@@ -287,8 +303,11 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
             {
                 submissions.TryGetValue(a.Id, out var s);
                 obligations.TryGetValue(a.Id, out var o);
-                return (Assignment: a, Status: a.StatusAt(now), Response: new StudentAssignmentResponse(Response(a, now),
-                    SubmissionStatus(s, o), o is not null, s?.Id, s?.SubmittedAt, s?.Score, s?.Feedback, s?.GradedAt));
+                var historical = historicalIds.Contains(a.Id);
+                var summary = Response(a, now);
+                if (historical) summary = summary with { Description = "", PromptFileName = null, SessionId = null };
+                return (Assignment: a, Status: a.StatusAt(now), Response: new StudentAssignmentResponse(summary,
+                    SubmissionStatus(s, o), !historical && o is not null, s?.Id, s?.SubmittedAt, s?.Score, s?.Feedback, s?.GradedAt, historical));
             })
             .Where(x => status is null || x.Status == status)
             .Where(x => kind is null || x.Assignment.Kind == kind)
@@ -357,6 +376,36 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
         return new(published, graded, missed);
     }
 
+    /// <summary>
+    /// Đề thi: học viên chỉ lấy được link khi bài đang mở (đã công bố, trong khung giờ) và còn quyền lớp. Giáo viên/nhân viên
+    /// đúng lớp lấy được bất cứ lúc nào, kể cả bản nháp. Link ký ngắn hạn do Media cấp cho chủ file đã lưu cùng bài.
+    /// </summary>
+    public async Task<FileDownloadResponse> DownloadPromptAsync(Guid assignmentId, CancellationToken ct)
+    {
+        var item = await FindAsync(assignmentId, ct);
+        await access.AuthorizeAsync(item.ClassId, CourseworkClassAccess.Read, ct);
+        EnsureVisible(item);
+        if (item.PromptFileId is not { } fileId || item.PromptOwnerId is not { } owner)
+            throw new AcademicFailure(404, "This assignment has no prompt file.");
+        if (access.IsStudent && item.StatusAt(clock.GetUtcNow()) != AssignmentStatus.Open)
+            throw new AcademicFailure(403, "The assignment prompt is available only while the assignment is open.");
+        var download = await classFiles.DownloadAsync(owner, fileId, PromptPurpose(item.Kind), ct) ?? throw new AcademicFailure(404, "Confirmed file not found.");
+        return new(download.Url, download.ExpiresAt);
+    }
+
+    private async Task AttachPromptAsync(Assignment item, Guid userId, Guid fileId, CancellationToken ct)
+    {
+        var file = await classFiles.GetConfirmedAsync(userId, fileId, PromptPurpose(item.Kind), ct);
+        if (file is null || file.ContentType != "application/pdf")
+            throw PromptFailure("The prompt must be a confirmed PDF you uploaded for this assignment type.");
+        item.AttachPrompt(file.FileId, userId, file.FileName, file.ContentType, file.SizeBytes);
+    }
+
+    private static string PromptPurpose(AssignmentKind kind) => kind == AssignmentKind.Exam ? "exam" : "material";
+
+    private static AcademicFailure PromptFailure(string message) =>
+        new(400, message, Errors("promptFileId", "Chọn file đề PDF do chính bạn tải lên và xác nhận."));
+
     private async Task<(string? Unit, string? Lesson)> SessionDefaultsAsync(Guid classId, Guid? sessionId, string? unit, string? lesson,
         CancellationToken ct)
     {
@@ -377,7 +426,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
     private static AssignmentKind? ParseKind(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null
         : Enum.TryParse<AssignmentKind>(value.Trim(), true, out var kind) && Enum.IsDefined(kind) && !int.TryParse(value, out _) ? kind
-        : throw new AcademicFailure(400, "Kind must be InClass or Homework.", Errors("kind", "Chọn InClass (Trên lớp) hoặc Homework (Về nhà)."));
+        : throw new AcademicFailure(400, "Kind must be InClass, Homework or Exam.", Errors("kind", "Chọn InClass (Trên lớp), Homework (Về nhà) hoặc Exam (Bài thi)."));
 
     private static AssignmentStatus? ParseStatus(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null
@@ -414,10 +463,10 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
 
     internal static AssignmentResponse Response(Assignment item, DateTimeOffset now) => new(item.Id, item.ClassId, item.Title,
         item.Description, item.OpensAtUtc, item.ClosesAtUtc, item.Kind.ToString(), item.Unit, item.Lesson, item.SessionId,
-        item.IsLegacy, item.StatusAt(now).ToString(), item.PublishedAt, item.CreatedAt, item.Version);
+        item.IsLegacy, item.StatusAt(now).ToString(), item.PublishedAt, item.CreatedAt, item.Version, item.PromptFileName);
 
     internal static SubmissionResponse Response(Submission item) => new(item.Id, item.AssignmentId, item.StudentId, item.Revision,
         item.SubmittedAt,
         item.Files.OrderBy(x => x.FileName).ThenBy(x => x.FileId).Select(x => new SubmissionFileResponse(x.FileId, x.FileName, x.ContentType, x.SizeBytes)).ToList(),
-        item.Score, item.Feedback, item.GradeVersion, item.GradedAt, item.GradedBy);
+        item.Score, item.Feedback, item.GradeVersion, item.GradedAt, item.GradedBy, AnswerText: item.AnswerText);
 }

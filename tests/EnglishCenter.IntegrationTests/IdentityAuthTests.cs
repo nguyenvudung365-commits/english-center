@@ -158,7 +158,7 @@ public sealed class IdentityAuthTests : IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
         var tokens = scope.ServiceProvider.GetRequiredService<ITokenService>();
         var user = await db.Users.FirstAsync();
-        db.RefreshSessions.Add(RefreshSession.Create(user.Id, tokens.HashRefreshToken("expired"), DateTimeOffset.UtcNow.AddDays(-1)));
+        db.RefreshSessions.Add(RefreshSession.Create(Guid.NewGuid(), user.Id, tokens.HashRefreshToken("expired"), DateTimeOffset.UtcNow.AddDays(-1)));
         await db.SaveChangesAsync();
         Assert.Equal(HttpStatusCode.Unauthorized, (await _client.PostAsJsonAsync("/api/identity/auth/refresh", new RefreshRequest("expired"))).StatusCode);
     }
@@ -197,7 +197,7 @@ public sealed class IdentityAuthTests : IAsyncLifetime
         var store = scope.ServiceProvider.GetRequiredService<IIdentityStore>();
         var issuer = scope.ServiceProvider.GetRequiredService<ITokenService>();
         var admin = (await store.FindByEmailAsync(User.NormalizeEmail("Admin@example.test"), default))!;
-        var expired = issuer.Issue(admin, DateTimeOffset.UtcNow.AddHours(-2));
+        var expired = issuer.Issue(admin, Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(-2));
         foreach (var token in new[] { expired.AccessToken, "invalid.token.signature" })
         {
             _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);

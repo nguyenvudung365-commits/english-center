@@ -25,6 +25,24 @@ internal sealed class IdentityStore(IdentityDbContext db) : IIdentityStore
         var users = await db.Users.AsNoTracking().Where(x => role == null || x.Role == role).ToListAsync(ct);
         return users.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).ToList();
     }
+    public async Task<ManagedAccountPage> ListManagedAccountsAsync(string role, string query, string? mobileDigits, int page, int pageSize, CancellationToken ct)
+    {
+        var users = db.Users.AsNoTracking().Where(x => x.Role == role);
+        if (query.Length != 0)
+        {
+            var term = query.ToUpperInvariant();
+            users = users.Where(x => x.FullName.ToUpper().Contains(term) || x.NormalizedEmail.Contains(term) ||
+                (x.StudentCode != null && x.StudentCode.Contains(term)) || (x.Phone != null &&
+                    (x.Phone.Contains(term) || (mobileDigits != null && x.Phone.Replace(" ", "").Replace(".", "").Replace("-", "").EndsWith(mobileDigits)))));
+        }
+
+        var total = await users.CountAsync(ct);
+        var items = await users.OrderBy(x => x.FullName).ThenBy(x => x.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(x => new ManagedAccount(x.Id, x.FullName, x.Email, x.Phone, x.StudentCode, x.IsLocked, x.Revision))
+            .ToListAsync(ct);
+        return new ManagedAccountPage(items, total, page, pageSize);
+    }
     public void AddUser(User user) => db.Users.Add(user);
     public void AddSession(RefreshSession session) => db.RefreshSessions.Add(session);
     public async Task SaveAsync(CancellationToken ct)

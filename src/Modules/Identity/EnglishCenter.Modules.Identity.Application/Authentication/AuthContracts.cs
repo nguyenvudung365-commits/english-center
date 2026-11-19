@@ -17,6 +17,13 @@ public sealed record ManagedTeacher(Guid Id, string FullName, string Email, stri
 public sealed record UpdateTeacherRequest([Required, MaxLength(200)] string FullName,
     [Required, EmailAddress, MaxLength(254)] string Email, [MaxLength(32)] string? Phone, [Required] Guid? ExpectedRevision);
 public sealed record TeacherLockRequest([Required] bool? IsLocked, [Required] Guid? ExpectedRevision);
+public sealed record ManagedAccount(Guid Id, string FullName, string Email, string? Phone, string? StudentCode, bool IsLocked, Guid Revision);
+public sealed record ManagedAccountPage(IReadOnlyList<ManagedAccount> Items, int Total, int Page, int PageSize);
+public sealed record UpdateStudentContactRequest([Required, MaxLength(200)] string FullName,
+    [Required, EmailAddress, MaxLength(254)] string Email, [MaxLength(32)] string? Phone, [Required] Guid? ExpectedRevision);
+public sealed record ProvisionStaffRequest([Required, EmailAddress, MaxLength(254)] string Email,
+    [Required, MaxLength(200)] string FullName, [Required, MinLength(8), MaxLength(128)] string Password, [MaxLength(32)] string? Phone = null);
+public sealed record AccountLockRequest([Required] bool? IsLocked, [Required] Guid? ExpectedRevision);
 public sealed record UpdateProfileRequest([Required, MaxLength(200)] string FullName,
     [Required, EmailAddress, MaxLength(254)] string Email, [MaxLength(32)] string? Phone,
     Guid? AvatarFileId, [Required] Guid? ExpectedRevision);
@@ -47,6 +54,7 @@ public interface IIdentityStore
     Task<RefreshSession?> FindSessionAsync(string hash, CancellationToken ct);
     Task<IReadOnlyList<RefreshSession>> SessionsAsync(Guid userId, CancellationToken ct);
     Task<IReadOnlyList<User>> UsersAsync(string? role, CancellationToken ct);
+    Task<ManagedAccountPage> ListManagedAccountsAsync(string role, string query, string? mobileDigits, int page, int pageSize, CancellationToken ct);
     void AddUser(User user);
     void AddSession(RefreshSession session);
     Task SaveAsync(CancellationToken ct);
@@ -60,6 +68,6 @@ public interface IPasswordService
 
 public interface ITokenService
 {
-    TokenResponse Issue(User user, DateTimeOffset now);
+    TokenResponse Issue(User user, Guid sessionId, DateTimeOffset now);
     string HashRefreshToken(string token);
 }

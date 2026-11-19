@@ -47,7 +47,7 @@ public sealed class SessionService(ISessionStore store, IAcademicStore classes, 
         return Response(changed, item, teacher?.FullName ?? string.Empty);
     }
 
-    private async Task<(Session Session, Class Item)> ValidateScheduleAsync(CreateSessionRequest request, CancellationToken ct)
+    internal async Task<(Session Session, Class Item)> ValidateScheduleAsync(CreateSessionRequest request, CancellationToken ct)
     {
         var errors = new Dictionary<string, string[]>();
         if (request.ClassId is null || request.ClassId == Guid.Empty) errors[nameof(request.ClassId)] = ["Class is required."];
@@ -133,7 +133,7 @@ public sealed class SessionService(ISessionStore store, IAcademicStore classes, 
         }).ToList();
     }
 
-    private static SessionResponse Response(Session session, Class item, string teacherName) =>
+    internal static SessionResponse Response(Session session, Class item, string teacherName) =>
         new(session.Id, item.Id, item.Code, item.Name, item.TeacherId, teacherName, session.Unit, session.Lesson,
             Enum.GetValues<SessionSkills>().Where(x => (session.Skills & x) != 0).Select(x => x.ToString()).ToArray(),
             session.SessionType.ToString(), session.ExamSlot, Utc(session.StartsAtUtc), Utc(session.EndsAtUtc), Utc(session.CreatedAtUtc), session.Revision, session.IsCancelled);

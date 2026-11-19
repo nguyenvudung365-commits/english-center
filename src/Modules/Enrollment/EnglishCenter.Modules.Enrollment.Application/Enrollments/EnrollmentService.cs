@@ -51,4 +51,7 @@ public sealed class EnrollmentService(IEnrollmentStore store, Registrations.Enro
     public async Task<bool> IsActiveAsync(Guid classId, Guid studentId, CancellationToken ct) =>
         await students.IsActiveStudentAsync(studentId, ct) &&
         await store.FindAsync(classId, studentId, ct) is { Status: "Active", IsActive: true };
+
+    public Task<IReadOnlyList<Guid>> TransferredClassIdsAsync(Guid studentId, CancellationToken ct) =>
+        store.TransferredClassIdsAsync(studentId, ct);
 }

@@ -12,8 +12,15 @@ using Microsoft.AspNetCore.Mvc;
 namespace EnglishCenter.Modules.Academic.Api.Controllers;
 
 [ApiController, Route("api/academic/sessions"), Authorize(Roles = AcademicRoles.Readers), AcademicErrors]
-public sealed class SessionsController(SessionService sessions, ClassAccess access) : ControllerBase
+public sealed class SessionsController(SessionService sessions, SessionBatchService batches, ClassAccess access) : ControllerBase
 {
+    [HttpPost("batch/preview"), Authorize(Roles = AcademicRoles.Managers)]
+    public Task<SessionBatchPreview> PreviewBatch(CreateSessionBatchBody body, CancellationToken ct) => batches.PreviewAsync(body.ToRequest(), ct);
+
+    [HttpPost("batch"), Authorize(Roles = AcademicRoles.Managers)]
+    public async Task<IActionResult> CreateBatch(CreateSessionBatchBody body, CancellationToken ct) =>
+        StatusCode(201, await batches.CreateAsync(body.ToRequest(), ct));
+
     [HttpPost, Authorize(Roles = AcademicRoles.Managers)]
     public async Task<IActionResult> Create(CreateSessionBody body, CancellationToken ct)
     {
@@ -57,6 +64,18 @@ public sealed record CreateSessionBody(
     [Required] [property: JsonConverter(typeof(ExplicitOffsetDateTimeConverter))] DateTimeOffset? EndsAtUtc,
     [Required] string? Unit, [Required] string? Lesson, [Required] string[]? Skills,
     [Required] string? SessionType, string? ExamSlot = null, int? ExpectedRevision = null);
+
+public sealed record BatchSlotBody(
+    [Required] [property: JsonConverter(typeof(ExplicitOffsetDateTimeConverter))] DateTimeOffset? StartsAtUtc,
+    [Required] [property: JsonConverter(typeof(ExplicitOffsetDateTimeConverter))] DateTimeOffset? EndsAtUtc);
+
+public sealed record CreateSessionBatchBody(
+    [Required] Guid? ClassId, [Required] string? Unit, [Required] string? Lesson, [Required] string[]? Skills,
+    [Required] string? SessionType, [Required] BatchSlotBody?[]? Slots, string? ExamSlot = null)
+{
+    internal CreateSessionBatchRequest ToRequest() => new(ClassId, Unit, Lesson, Skills, SessionType, ExamSlot,
+        Slots?.Select(x => x is null ? null : new BatchSessionSlot(x.StartsAtUtc, x.EndsAtUtc)).ToArray());
+}
 
 public sealed record CancelSessionBody(int? ExpectedRevision);
 

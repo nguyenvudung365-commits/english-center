@@ -12,9 +12,12 @@ internal sealed class AssignmentConfiguration : IEntityTypeConfiguration<Assignm
         builder.ToTable("assignments", t =>
         {
             t.HasCheckConstraint("ck_assignments_window", "closes_at_utc > opens_at_utc");
-            t.HasCheckConstraint("ck_assignments_kind", "kind IN ('InClass', 'Homework')");
+            t.HasCheckConstraint("ck_assignments_kind", "kind IN ('InClass', 'Homework', 'Exam')");
+            t.HasCheckConstraint("ck_assignments_exam_prompt", "kind <> 'Exam' OR prompt_file_id IS NOT NULL");
         });
         builder.HasKey(x => x.Id); builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.Property(x => x.PromptFileName).HasMaxLength(255);
+        builder.Property(x => x.PromptContentType).HasMaxLength(128);
         builder.Property(x => x.Title).HasMaxLength(Assignment.TitleMaxLength).IsRequired();
         builder.Property(x => x.Description).HasMaxLength(Assignment.DescriptionMaxLength).IsRequired();
         builder.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20).IsRequired();
@@ -40,6 +43,7 @@ internal sealed class SubmissionConfiguration : IEntityTypeConfiguration<Submiss
         builder.Property(x => x.Revision).IsConcurrencyToken();
         builder.Property(x => x.Score).HasPrecision(3, 1);
         builder.Property(x => x.Feedback).HasMaxLength(Submission.FeedbackMaxLength);
+        builder.Property(x => x.AnswerText).HasMaxLength(Submission.AnswerMaxLength);
         builder.HasIndex(x => new { x.AssignmentId, x.StudentId }).IsUnique();
         builder.HasOne<Assignment>().WithMany().HasForeignKey(x => x.AssignmentId).OnDelete(DeleteBehavior.Restrict);
         builder.HasMany(x => x.Files).WithOne().HasForeignKey(x => x.SubmissionId).IsRequired().OnDelete(DeleteBehavior.Cascade);

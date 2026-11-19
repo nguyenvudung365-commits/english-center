@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { CircleUserRound } from "lucide-react";
 import { ApiError, getSession, getSessionGeneration, identity } from "./api";
+import { localizeSystemMessage } from "./api-messages";
 import { canManageAcademic, isAcademicId, listClasses, type ClassDetail } from "./academic";
 import { useRead } from "./academic-pages";
 import {
-    calendarRange, cancelSession, centerDate, getScheduledSession, listSessions,
-    navigateCalendar, saveSession, sessionLocalTime, sessionSkills, sessionsForDay, validateSessionDraft,
-    type CalendarMode, type ScheduledSession, type SessionDraft,
+    calendarRange, cancelSession, centerDate, createSessionBatch, getScheduledSession, listSessions,
+    navigateCalendar, previewSessionBatch, recurringBatchDates, saveSession, sessionLocalTime, sessionSkills, sessionsForDay, toggleBatchDate,
+    validateBatchDraft, validateSessionDraft,
+    type BatchDraft, type BatchPreview, type CalendarMode, type ScheduledSession, type SessionDraft,
 } from "./schedule";
 import { ErrorMessage, PageHeading } from "./ui";
+import "./schedule-batch.css";
 
 const types: Record<string, string> = { Regular: "Buổi học", MockTest: "Thi thử", FinalTest: "Thi cuối khóa" };
 const skills: Record<string, string> = { Listening: "Nghe", Reading: "Đọc", Writing: "Viết", Speaking: "Nói" };
@@ -36,13 +40,32 @@ async function allClasses(): Promise<ClassDetail[]> {
     }
 }
 
-function SessionLink({ item }: { item: ScheduledSession }) {
-    const status = item.isCancelled ? "Đã hủy" : types[item.sessionType];
-    return <Link className="session-link" to={`/schedule/${item.id}`}
-        aria-label={`${item.classCode}, ${item.lesson}, ${status}, ${fullTime(item.startsAtUtc)} đến ${fullTime(item.endsAtUtc)}, giờ Việt Nam`}>
-        <time dateTime={item.startsAtUtc}>{timeLabel(item.startsAtUtc)}</time>
-        <span className="session-calendar-name">{item.classCode} · {item.lesson}</span>
-        <span className="session-calendar-type">{status}</span>
+function SessionLink({ item, classType }: { item: ScheduledSession; classType: ClassDetail["classType"] | undefined }) {
+    const type = types[item.sessionType];
+    const classLabel = classType === "Main" ? "Lớp chính" : classType === "Supplementary" ? "Lớp bổ trợ" : null;
+    const overnight = centerDate(item.startsAtUtc) !== centerDate(item.endsAtUtc);
+    return <Link className="session-link" data-type={item.sessionType} to={`/schedule/${item.id}`}>
+        <span className="session-card-header">
+            <time dateTime={item.startsAtUtc}><span className="sr-only">Bắt đầu </span>{timeLabel(item.startsAtUtc)}</time>
+            <time dateTime={item.endsAtUtc}><span className="sr-only">Kết thúc </span>{timeLabel(item.endsAtUtc)}</time>
+            <CircleUserRound size={16} aria-hidden="true" />
+        </span>
+        <span className="session-card-body">
+            <strong>{item.lesson}</strong>
+            {overnight && <span>{fullTime(item.startsAtUtc)} – {fullTime(item.endsAtUtc)}</span>}
+            {item.examSlot && <span className="session-card-slot">{item.examSlot}</span>}
+            {item.skills.length > 0 && <span className="session-card-skills">
+                <span className="sr-only">Kỹ năng: </span>
+                {item.skills.map(skill => <span key={skill}>{skills[skill] ?? skill}</span>)}
+            </span>}
+            {item.teacherName && <span><span className="sr-only">Giáo viên: </span>{item.teacherName}</span>}
+            <span className="session-card-code"><span className="sr-only">Mã lớp: </span>{item.classCode}</span>
+            <span className="session-card-badges">
+                {classLabel && <span className="session-card-class-type" data-class-type={classType}>{classLabel}</span>}
+                <span>{type}</span>
+                {item.isCancelled && <span className="session-card-cancelled">Đã hủy</span>}
+            </span>
+        </span>
     </Link>;
 }
 
@@ -79,16 +102,31 @@ export function Schedule() {
             changeCalendar(navigateCalendar(anchor, mode, direction), mode);
         } catch { setNavigationError(new Error("Đã đến giới hạn ngày được hỗ trợ.")); }
     };
-    const classKnown = classes.data?.some((item) => item.id === classId);
+    const classTypes = new Map(classes.data?.map((item) => [item.id, item.classType]));
+    const classKnown = classTypes.has(classId);
+    const [selecting, setSelecting] = useState(false);
+    const [selected, setSelected] = useState<string[]>([]);
+    const [batchNotice, setBatchNotice] = useState("");
+    const toggleDate = (day: string) => {
+        try { setSelected(toggleBatchDate(selected, day)); setNavigationError(null); } catch (failure) { setNavigationError(failure); }
+    };
     return <>
         <PageHeading title="Lịch học" subtitle="Lịch học và lịch dạy theo quyền truy cập. Tất cả ngày giờ hiển thị theo giờ Việt Nam (UTC+7)." />
         <div className="academic-actions">
-            <Link className="secondary inline" to="/classes">Danh sách lớp</Link>
             {manager && <button className="primary" aria-expanded={showCreate} aria-controls="session-create" onClick={() => {
                 setCreateMounted(true);
                 setShowCreate((previous) => !previous);
             }}>{showCreate ? "Đóng biểu mẫu" : "Tạo buổi học"}</button>}
+            {manager && <button className="secondary" aria-pressed={selecting} aria-controls="session-batch" onClick={() => {
+                setSelecting((previous) => !previous);
+                setSelected([]);
+                setBatchNotice("");
+            }}>{selecting ? "Thoát chế độ chọn nhiều ngày" : "Thêm nhiều buổi từ lịch"}</button>}
         </div>
+        {batchNotice && <p className="notice" role="status">{batchNotice}</p>}
+        {manager && selecting && <RecurringDates today={today} onAdd={(from, to, weekdays) => setSelected(recurringBatchDates(selected, from, to, weekdays))} />}
+        {manager && selecting && <SessionBatch classes={classes.data} initialClassId={classId} dates={selected} clearDates={() => setSelected([])}
+            onCreated={(count) => { setSelected([]); setBatchNotice(`Đã tạo ${count} buổi học.`); sessions.retry(); }} />}
         {manager && <section hidden={!showCreate} className="panel session-create" id="session-create" aria-labelledby="create-session-heading">
             <h2 id="create-session-heading">Tạo buổi học</h2>
             <p>Chọn lớp và nhập thời gian tại Việt Nam. Máy chủ kiểm tra ngày của lớp và lịch trùng giáo viên trước khi lưu.</p>
@@ -134,11 +172,17 @@ export function Schedule() {
                 <p role="status" className="small muted">{sessions.data.length ? `${sessions.data.length} buổi trong khoảng lịch đang xem.` : "Chưa có buổi học trong khoảng lịch đang xem."}</p>
                 <a className="text-button inline" href="#schedule-agenda">Đến danh sách lịch theo ngày</a>
             </>}
-            <section className={`calendar calendar-${mode}`} aria-label={mode === "week" ? "Lịch tuần, bắt đầu thứ Hai" : "Lịch tháng, bắt đầu thứ Hai"} aria-busy={sessions.loading}>
-                {range.days.map((day, index) => <section key={day} className={`calendar-day ${day.slice(0, 7) !== anchor.slice(0, 7) && mode === "month" ? "spillover" : ""} ${day === today ? "is-today" : ""}`} aria-label={dayLabel(day)}>
+            {mode === "month" && <p className="calendar-scroll-hint small muted">Cuộn ngang để xem đủ 7 ngày hoặc mở danh sách lịch theo ngày.</p>}
+            <section className={mode === "month" ? "calendar-scroll" : undefined} tabIndex={mode === "month" ? 0 : undefined}
+                aria-label={mode === "week" ? "Lịch tuần, bắt đầu thứ Hai" : "Lịch tháng, bắt đầu thứ Hai"} aria-busy={sessions.loading}>
+                <div className={`calendar calendar-${mode}`}>
+                {range.days.map((day, index) => <section key={day} className={`calendar-day ${day.slice(0, 7) !== anchor.slice(0, 7) && mode === "month" ? "spillover" : ""} ${day === today ? "is-today" : ""} ${selecting && selected.includes(day) ? "is-selected" : ""}`} aria-label={dayLabel(day)}>
                     <h3><span className="calendar-weekday">{["T2", "T3", "T4", "T5", "T6", "T7", "CN"][index % 7]}</span><time dateTime={day} aria-current={day === today ? "date" : undefined}>{Number(day.slice(-2))}<span className="sr-only">/{day.slice(5, 7)}/{day.slice(0, 4)}</span></time></h3>
-                    {sessions.data && <ul className="calendar-events">{sessionsForDay(sessions.data, day).map((item) => <li key={item.id}><SessionLink item={item} /></li>)}</ul>}
+                    {manager && selecting && <button type="button" className="secondary day-select" aria-pressed={selected.includes(day)}
+                        aria-label={`${selected.includes(day) ? "Bỏ chọn" : "Chọn"} ${dayLabel(day)}`} onClick={() => toggleDate(day)}>{selected.includes(day) ? "Đã chọn" : "Chọn"}</button>}
+                    {sessions.data && <ul className="calendar-events">{sessionsForDay(sessions.data, day).map((item) => <li key={item.id}><SessionLink item={item} classType={classTypes.get(item.classId)} /></li>)}</ul>}
                 </section>)}
+                </div>
             </section>
         </section>
         {sessions.data && <section className="panel schedule-agenda" id="schedule-agenda" aria-labelledby="agenda-heading" tabIndex={-1}>
@@ -151,14 +195,41 @@ export function Schedule() {
                 return <section className="agenda-day" key={day}>
                     <h3><time dateTime={day}>{dayLabel(day)}</time></h3>
                     <ul className="agenda-list">{items.map((item) => <li key={item.id}>
-                        <SessionLink item={item} />
-                        <p>{item.className} · {item.teacherName}</p>
-                        <p className="small">{fullTime(item.startsAtUtc)} — {fullTime(item.endsAtUtc)} · {item.unit} · {item.skills.map((skill) => skills[skill] ?? skill).join(", ")}</p>
+                        <SessionLink item={item} classType={classTypes.get(item.classId)} />
+                        <p className="small">{item.className} · {item.unit}</p>
                     </li>)}</ul>
                 </section>;
             })}
         </section>}
     </>;
+}
+
+function RecurringDates({ today, onAdd }: { today: string; onAdd: (from: string, to: string, weekdays: number[]) => void }) {
+    const [error, setError] = useState<unknown>(null);
+    return <details className="panel">
+        <summary>Lặp theo thứ trong tuần</summary>
+        <form className="academic-form" onSubmit={event => {
+            event.preventDefault();
+            const fields = new FormData(event.currentTarget);
+            try {
+                onAdd(String(fields.get("from")), String(fields.get("to")), fields.getAll("weekday").map(Number));
+                setError(null);
+            } catch (failure) { setError(failure); }
+        }}>
+            <div className="academic-fields">
+                <label htmlFor="repeat-from">Từ ngày<input id="repeat-from" name="from" type="date" defaultValue={today} required /></label>
+                <label htmlFor="repeat-to">Đến ngày<input id="repeat-to" name="to" type="date" defaultValue={today} required /></label>
+            </div>
+            <fieldset className="session-skills">
+                <legend>Lặp vào</legend>
+                <div className="academic-actions">
+                    {[1, 2, 3, 4, 5, 6, 0].map(day => <label key={day}><input name="weekday" type="checkbox" value={day} /> {day ? `Thứ ${day + 1}` : "Chủ nhật"}</label>)}
+                </div>
+            </fieldset>
+            <ErrorMessage error={error} />
+            <button className="secondary">Thêm ngày vào danh sách</button>
+        </form>
+    </details>;
 }
 
 function ClassLoadState({ result }: { result: { loading: boolean; error: unknown; data: ClassDetail[] | null; retry: () => void } }) {
@@ -168,6 +239,134 @@ function ClassLoadState({ result }: { result: { loading: boolean; error: unknown
         {result.error ? <button className="secondary" onClick={result.retry}>Thử tải lại danh sách lớp</button> : null}
         {result.data?.length === 0 && <p>Chưa có lớp được phép xem.</p>}
     </div>;
+}
+
+const slotStatus: Record<string, string> = {
+    Ok: "Có thể tạo",
+    Invalid: "Không hợp lệ",
+    BatchOverlap: "Trùng với một ngày khác đã chọn",
+    TeacherOverlap: "Giáo viên đã có buổi trùng giờ",
+};
+
+function SessionBatch({ classes, initialClassId, dates, clearDates, onCreated }: {
+    classes: ClassDetail[] | null; initialClassId: string; dates: string[]; clearDates: () => void; onCreated: (count: number) => void;
+}) {
+    const [fields, setFields] = useState({ classId: initialClassId, unit: "", lesson: "", skills: [] as string[],
+        sessionType: "Regular", examSlot: "", startTime: "08:00", endTime: "09:30" });
+    const draft: BatchDraft = { ...fields, dates };
+    const key = JSON.stringify(draft);
+    const [preview, setPreview] = useState<{ key: string; data: BatchPreview } | null>(null);
+    const [attempted, setAttempted] = useState(false);
+    const [error, setError] = useState<unknown>();
+    const [pending, setPending] = useState(false);
+    const lock = useRef(false);
+    const alive = useRef(false);
+    const form = useRef<HTMLFormElement>(null);
+    useEffect(() => {
+        alive.current = true;
+        return () => { alive.current = false; };
+    }, []);
+    const errors = validateBatchDraft(draft);
+    if (classes && !classes.some((item) => item.id === draft.classId)) errors.classId = ["Chọn lớp trong danh sách được phép xem."];
+    // A preview only counts for the exact inputs it was computed from, so any edit or date change forces a new preview.
+    const current = preview?.key === key ? preview.data : null;
+    const set = (changes: Partial<typeof fields>) => { setFields((previous) => ({ ...previous, ...changes })); setError(null); };
+    const shown = (name: string) => attempted && errors[name] ? <p className="field-error" id={`batch-error-${name}`} role="alert">{errors[name].join(" ")}</p> : null;
+    const attributes = (name: keyof typeof fields & string) => ({
+        id: `batch-${name}`, disabled: pending, "aria-invalid": attempted && !!errors[name],
+        "aria-describedby": attempted && errors[name] ? `batch-error-${name}` : undefined,
+    });
+    const chosen = classes?.find((item) => item.id === draft.classId);
+
+    async function run(kind: "preview" | "create") {
+        if (lock.current) return;
+        setAttempted(true);
+        if (Object.keys(errors).length) {
+            requestAnimationFrame(() => form.current?.querySelector<HTMLElement>("[aria-invalid='true']")?.focus());
+            return;
+        }
+        lock.current = true;
+        setPending(true);
+        setError(null);
+        const generation = getSessionGeneration();
+        try {
+            if (kind === "preview") {
+                const data = await previewSessionBatch(draft);
+                if (alive.current && generation === getSessionGeneration()) setPreview({ key, data });
+            } else {
+                const created = await createSessionBatch(draft);
+                if (alive.current && generation === getSessionGeneration()) { setPreview(null); onCreated(created.length); }
+            }
+        } catch (failure) {
+            if (alive.current && generation === getSessionGeneration()) {
+                setError(failure);
+                // After a failed write the old preview is no longer trustworthy; the user must preview again.
+                if (kind === "create") setPreview(null);
+            }
+        } finally {
+            if (alive.current && generation === getSessionGeneration()) { lock.current = false; setPending(false); }
+        }
+    }
+
+    const problems = current?.items.filter((item) => item.status !== "Ok").length ?? 0;
+    return <section className="panel" id="session-batch" aria-labelledby="batch-heading">
+        <h2 id="batch-heading">Thêm nhiều buổi học từ lịch</h2>
+        <p>Bấm “Chọn” ở các ngày trên lịch (có thể chuyển tuần hoặc tháng), nhập thông tin chung rồi xem trước. Chỉ khi toàn bộ buổi hợp lệ và không trùng lịch giáo viên bạn mới xác nhận tạo; hệ thống tạo tất cả hoặc không tạo buổi nào.</p>
+        <form ref={form} className="academic-form" noValidate aria-busy={pending} onSubmit={(event) => { event.preventDefault(); void run("preview"); }}>
+            <p id="batch-dates-label"><strong>Ngày đã chọn: {dates.length}</strong></p>
+            {dates.length ? <ul className="batch-dates" aria-labelledby="batch-dates-label">{dates.map((day) => <li key={day}><time dateTime={day}>{day.split("-").reverse().join("/")}</time></li>)}</ul>
+                : <p className="small muted">Chưa chọn ngày nào.</p>}
+            {shown("dates")}
+            <div className="academic-fields">
+                <div className="academic-field"><label htmlFor="batch-classId">Lớp học</label>
+                    <select {...attributes("classId")} required value={fields.classId} disabled={pending || !classes?.length} onChange={(event) => set({ classId: event.target.value })}>
+                        <option value="">Chọn lớp học</option>
+                        {fields.classId && !classes?.some((item) => item.id === fields.classId) && <option value={fields.classId}>Lớp đang chọn (chờ xác minh)</option>}
+                        {classes?.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}
+                    </select>{shown("classId")}</div>
+                <div className="academic-field"><label htmlFor="batch-sessionType">Loại buổi học</label>
+                    <select {...attributes("sessionType")} value={fields.sessionType} onChange={(event) => set({ sessionType: event.target.value, ...(event.target.value === "Regular" ? { examSlot: "" } : {}) })}>
+                        {Object.entries(types).map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select>{shown("sessionType")}</div>
+                <div className="academic-field"><label htmlFor="batch-unit">Unit</label>
+                    <input {...attributes("unit")} required maxLength={100} value={fields.unit} onChange={(event) => set({ unit: event.target.value })} />{shown("unit")}</div>
+                <div className="academic-field"><label htmlFor="batch-lesson">Bài học</label>
+                    <input {...attributes("lesson")} required maxLength={200} value={fields.lesson} onChange={(event) => set({ lesson: event.target.value })} />{shown("lesson")}</div>
+                <div className="academic-field"><label htmlFor="batch-startTime">Giờ bắt đầu mỗi ngày — giờ Việt Nam (UTC+7)</label>
+                    <input {...attributes("startTime")} type="time" step={60} required value={fields.startTime} onChange={(event) => set({ startTime: event.target.value })} />{shown("startTime")}</div>
+                <div className="academic-field"><label htmlFor="batch-endTime">Giờ kết thúc mỗi ngày — giờ Việt Nam (UTC+7)</label>
+                    <input {...attributes("endTime")} type="time" step={60} required value={fields.endTime} onChange={(event) => set({ endTime: event.target.value })} />{shown("endTime")}</div>
+                {fields.sessionType !== "Regular" && <div className="academic-field"><label htmlFor="batch-examSlot">Ca thi (không bắt buộc)</label>
+                    <input {...attributes("examSlot")} maxLength={100} value={fields.examSlot} onChange={(event) => set({ examSlot: event.target.value })} />{shown("examSlot")}</div>}
+            </div>
+            {chosen && <p className="small muted">Giáo viên: {chosen.teacherName}. Ngày của lớp: {chosen.startDate} — {chosen.endDate} (Việt Nam).</p>}
+            <fieldset className="session-skills" disabled={pending}>
+                <legend>Kỹ năng (chọn ít nhất một)</legend>
+                <div>{sessionSkills.map((skill) => <label key={skill}><input type="checkbox" name="skills" value={skill} checked={fields.skills.includes(skill)} aria-invalid={attempted && !!errors.skills}
+                    onChange={(event) => set({ skills: event.target.checked ? [...fields.skills, skill] : fields.skills.filter((value) => value !== skill) })} />{skills[skill]}</label>)}</div>
+                {shown("skills")}
+            </fieldset>
+            <ErrorMessage error={error} />
+            {error instanceof ApiError && error.status === 409 && <p role="status">Lịch giáo viên đã thay đổi hoặc bị trùng nên không có buổi nào được tạo. Hãy xem trước lại để cập nhật kết quả.</p>}
+            {error instanceof ApiError && error.status === 0 && <p role="status">Chưa xác nhận được các buổi đã lưu hay chưa. Bấm “Xem trước” để kiểm tra trước khi tạo lại, tránh tạo trùng.</p>}
+            <div className="academic-actions">
+                <button className="secondary" disabled={pending}>{pending ? "Đang xử lý…" : "Xem trước lịch"}</button>
+                <button type="button" className="secondary" disabled={pending || !dates.length} onClick={clearDates}>Bỏ chọn tất cả ngày</button>
+            </div>
+        </form>
+        {preview && !current && <p role="status">Nội dung hoặc ngày chọn đã thay đổi sau lần xem trước. Hãy xem trước lại.</p>}
+        {current && <section aria-labelledby="batch-preview-heading">
+            <h3 id="batch-preview-heading">Xem trước {current.items.length} buổi</h3>
+            <p role="status">{current.canCreate ? "Tất cả buổi hợp lệ và không trùng lịch giáo viên. Kiểm tra rồi xác nhận để tạo."
+                : `${problems} buổi có vấn đề nên chưa thể tạo. Bỏ chọn các ngày đó trên lịch hoặc đổi giờ, rồi xem trước lại. Chưa có buổi nào được lưu.`}</p>
+            <ul className="batch-preview">{current.items.map((item) => <li key={item.index} className={item.status === "Ok" ? "" : "is-bad"}>
+                <strong>{dates[item.index] ? dayLabel(dates[item.index]) : `Buổi ${item.index + 1}`}</strong>
+                {item.startsAtUtc && item.endsAtUtc && <span>{timeLabel(item.startsAtUtc)} — {timeLabel(item.endsAtUtc)}</span>}
+                <span>{slotStatus[item.status] ?? "Chưa xác định"}{item.status === "Invalid" && item.message ? `: ${localizeSystemMessage(item.message, "Kiểm tra ngày và giờ đã nhập.")}` : ""}</span>
+            </li>)}</ul>
+            <button type="button" className="primary" disabled={pending || !current.canCreate} onClick={() => void run("create")}>
+                {pending ? "Đang tạo…" : `Xác nhận tạo ${current.items.length} buổi`}</button>
+        </section>}
+    </section>;
 }
 
 function SessionCreate({ classes, initialClassId, reload, existing, onSaved }: {

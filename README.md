@@ -197,7 +197,7 @@ docker compose --env-file .env -f compose.yaml -f compose.web.yaml up -d --build
 docker compose --env-file .env -f compose.yaml -f compose.web.yaml ps
 ```
 
-**Hỗ trợ đăng nhập qua Zalo (tùy chọn):** Đặt `VITE_SUPPORT_ZALO_URL` trong file môi trường dùng bởi Compose (ví dụ `.env.demo` cho demo) hoặc trong `frontend/.env.local` khi chạy Vite trực tiếp, rồi build lại web hoặc khởi động lại Vite. Chỉ dùng link HTTPS đã được đồng ý công khai trên `zalo.me`, `oa.zalo.me` hoặc link QR cá nhân dạng `https://zaloapp.com/qr/p/<mã>`. Link QR dùng để mở ứng dụng trên điện thoại; trên máy tính có thể chỉ hiện trang chủ Zalo. Đây là biến lúc build: URL xuất hiện trong mã web và ở trang đăng nhập, không phải secret. Nếu không đặt hoặc URL không hợp lệ, trang chỉ hiển thị lời nhắc liên hệ giáo vụ; không có chức năng tự đặt lại mật khẩu. Image web đã build sẵn không đọc biến này lúc khởi động.
+**Nút Hỗ trợ đăng nhập:** Đặt `VITE_SUPPORT_ZALO_URL` và `VITE_SUPPORT_EMAIL` trong file môi trường dùng bởi Compose (ví dụ `.env.demo`) hoặc trong `frontend/.env.local` khi chạy Vite trực tiếp, rồi build lại web hoặc khởi động lại Vite. Chỉ dùng email liên hệ công khai và link HTTPS Zalo đã được đồng ý công khai (`zalo.me`, `oa.zalo.me` hoặc `https://zaloapp.com/qr/p/<mã>`). Link QR có thể chỉ hiện trang chủ Zalo trên máy tính. Đây là cấu hình công khai lúc build; image đã build không đọc các biến này khi khởi động. Nút mở kênh liên hệ, không tự đặt lại mật khẩu.
 
 - API health: `http://localhost:5080/health`; Compose chạy **Production nên không bật Swagger**.
 - Web: `http://127.0.0.1:8088`, proxy `/api/` nội bộ. VPS dùng Caddy/HTTPS đến cổng này; Cloudflare Full (strict). Có thể bỏ overlay `compose.web.yaml` khi chỉ cần backend.

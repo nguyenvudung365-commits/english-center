@@ -30,6 +30,9 @@ public sealed class AssignmentsController(AssignmentService service) : Controlle
     public Task<AssignmentResponse> Get(Guid id, CancellationToken ct) => service.GetAsync(id, ct);
     [HttpPut("{id:guid}"), Authorize(Roles = Managers)]
     public Task<AssignmentResponse> Update(Guid id, UpdateAssignmentRequest request, CancellationToken ct) => service.UpdateAsync(id, request, ct);
+    // Đề thi PDF của bài Exam: học viên chỉ lấy được khi bài đang mở.
+    [HttpGet("{id:guid}/prompt/download")]
+    public Task<FileDownloadResponse> DownloadPrompt(Guid id, CancellationToken ct) => service.DownloadPromptAsync(id, ct);
     [HttpPost("{id:guid}/publish"), Authorize(Roles = Managers)]
     public Task<AssignmentResponse> Publish(Guid id, [FromBody] PublishAssignmentRequest? request, CancellationToken ct) =>
         service.PublishAsync(id, request ?? new PublishAssignmentRequest(null), ct);
@@ -48,6 +51,23 @@ public sealed class AssignmentsController(AssignmentService service) : Controlle
     [HttpGet("{id:guid}/submissions"), Authorize(Roles = Managers)]
     public Task<IReadOnlyList<SubmissionResponse>> Submissions(Guid id, [FromQuery] bool? graded, CancellationToken ct) =>
         service.ListSubmissionsAsync(id, graded, ct);
+}
+
+// Tài liệu độc lập của lớp: giáo viên/nhân viên đăng, thành viên lớp xem và tải.
+[ApiController, Route("api/academic/materials"), Authorize, AcademicErrors]
+[ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+public sealed class MaterialsController(MaterialService service) : ControllerBase
+{
+    [HttpPost, Authorize(Roles = Roles.Teacher + "," + Roles.Admin + "," + Roles.Staff)]
+    public async Task<IActionResult> Create(CreateMaterialRequest request, CancellationToken ct)
+    {
+        var item = await service.CreateAsync(request, ct);
+        return Created($"api/academic/materials/{item.Id}/download", item);
+    }
+    [HttpGet]
+    public Task<IReadOnlyList<MaterialResponse>> List([FromQuery] Guid classId, CancellationToken ct) => service.ListAsync(classId, ct);
+    [HttpGet("{id:guid}/download")]
+    public Task<FileDownloadResponse> Download(Guid id, CancellationToken ct) => service.DownloadAsync(id, ct);
 }
 
 [ApiController, Route("api/academic/submissions"), Authorize, AcademicErrors]

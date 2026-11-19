@@ -1,20 +1,41 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, setSession } from "./api";
 import {
+    batchSlots,
     calendarRange,
     cancelSession,
     centerDate,
     createSession,
+    createSessionBatch,
     getScheduledSession,
     listSessions,
+    maxBatchDates,
     navigateCalendar,
+    previewSessionBatch,
+    recurringBatchDates,
     saveSession,
     sessionsForDay,
+    toggleBatchDate,
+    validateBatchDraft,
     validateSessionDraft,
     vietnamLocalToUtc,
+    type BatchDraft,
     type ScheduledSession,
     type SessionDraft,
 } from "./schedule";
+
+describe("recurring batch dates", () => {
+    it("merges selected days with inclusive weekday matches across months", () => {
+        expect(recurringBatchDates(["2026-12-01", "2026-11-30"], "2026-11-30", "2026-12-07", [1, 4]))
+            .toEqual(["2026-11-30", "2026-12-01", "2026-12-03", "2026-12-07"]);
+    });
+    it("rejects invalid ranges, empty matches and too many days", () => {
+        expect(() => recurringBatchDates([], "2026-02-30", "2026-03-01", [1])).toThrow();
+        expect(() => recurringBatchDates([], "2026-12-07", "2026-12-06", [1])).toThrow();
+        expect(() => recurringBatchDates([], "2026-12-01", "2026-12-01", [1])).toThrow();
+        expect(() => recurringBatchDates([], "2026-01-01", "2026-12-31", [1, 4])).toThrow();
+    });
+});
 
 const classId = "11111111-1111-4111-8111-111111111111";
 const id = "22222222-2222-4222-8222-222222222222";
@@ -215,9 +236,9 @@ describe("Session draft validation and HTTP contract", () => {
 
     it("preserves overlap409 and entered values without blindly retrying POST", async () => {
         const input = draft(); const original = structuredClone(input);
-        const errors = { StartsAtUtc: ["Teacher already booked."] };
-        fetcher.mockResolvedValue(json({ title: "Teacher overlap", errors }, 409));
-        await expect(createSession(input)).rejects.toMatchObject({ status: 409, message: "Teacher overlap", errors });
+        const errors = { StartsAtUtc: ["Teacher already has an overlapping session."] };
+        fetcher.mockResolvedValue(json({ title: errors.StartsAtUtc[0], errors }, 409));
+        await expect(createSession(input)).rejects.toMatchObject({ status: 409, message: "Giáo viên đã có buổi học trùng giờ.", errors: { StartsAtUtc: ["Giáo viên đã có buổi học trùng giờ."] } });
         expect(input).toEqual(original);
         expect(fetcher).toHaveBeenCalledTimes(1);
     });
@@ -293,5 +314,96 @@ describe("Sub-millisecond schedule precision", () => {
             await expect(request).rejects.toMatchObject({ status: 400 });
             expect(fetcher).not.toHaveBeenCalled();
         });
+    });
+});
+
+describe("Batch scheduling from selected calendar dates", () => {
+    const batch = (changes: Partial<BatchDraft> = {}): BatchDraft => ({
+        classId, unit: " Unit 1 ", lesson: " Bài học ", skills: ["Speaking", "Listening"], sessionType: "Regular", examSlot: " ",
+        dates: ["2027-01-02", "2027-01-01"], startTime: "08:00", endTime: "09:30", ...changes,
+    });
+    const fetcher = vi.fn<typeof fetch>();
+    beforeEach(() => {
+        fetcher.mockReset();
+        vi.stubGlobal("fetch", fetcher);
+        setSession({ accessToken: "schedule-access", refreshToken: "schedule-refresh",
+            accessTokenExpiresAt: new Date(Date.now() + 600000).toISOString(),
+            refreshTokenExpiresAt: new Date(Date.now() + 86400000).toISOString() });
+    });
+    afterEach(() => { setSession(null); vi.unstubAllGlobals(); });
+
+    it("toggles dates immutably, keeps them sorted and unique, and rejects invalid or excess dates", () => {
+        const start = ["2027-01-03"];
+        const added = toggleBatchDate(start, "2027-01-01");
+        expect(added).toEqual(["2027-01-01", "2027-01-03"]);
+        expect(start).toEqual(["2027-01-03"]);
+        expect(toggleBatchDate(added, "2027-01-03")).toEqual(["2027-01-01"]);
+        expect(() => toggleBatchDate(added, "2027-02-30")).toThrow();
+        const full = Array.from({ length: maxBatchDates }, (_, index) => new Date(Date.UTC(2027, 0, 1 + index)).toISOString().slice(0, 10));
+        expect(() => toggleBatchDate(full, "2028-01-01")).toThrow(/tối đa/);
+        expect(toggleBatchDate(full, full[0])).toHaveLength(maxBatchDates - 1);
+    });
+
+    it("builds one UTC+7 slot per date, in date order, independent of the host timezone", () => {
+        expect(batchSlots(batch())).toEqual([
+            { startsAtUtc: "2027-01-01T01:00:00.000Z", endsAtUtc: "2027-01-01T02:30:00.000Z" },
+            { startsAtUtc: "2027-01-02T01:00:00.000Z", endsAtUtc: "2027-01-02T02:30:00.000Z" },
+        ]);
+    });
+
+    it("accepts a valid draft and reuses the single-session field rules", () => {
+        expect(validateBatchDraft(batch())).toEqual({});
+        expect(validateBatchDraft(batch({ unit: " " })).unit).toEqual([expect.any(String)]);
+        expect(validateBatchDraft(batch({ skills: [] })).skills).toEqual([expect.any(String)]);
+        expect(validateBatchDraft(batch({ sessionType: "Regular", examSlot: "x" })).examSlot).toEqual([expect.any(String)]);
+    });
+
+    it.each<[Partial<BatchDraft>, string]>([
+        [{ dates: [] }, "dates"],
+        [{ dates: ["2027-01-01", "2027-01-01"] }, "dates"],
+        [{ dates: ["2027-02-30"] }, "dates"],
+        [{ startTime: "" }, "startTime"],
+        [{ endTime: "25:00" }, "endTime"],
+        [{ endTime: "08:00" }, "endTime"],
+        [{ endTime: "07:00" }, "endTime"],
+    ])("rejects %j on field %s", (changes, field) => {
+        expect(validateBatchDraft(batch(changes))[field]).toEqual([expect.any(String)]);
+    });
+
+    it("POSTs preview with the shared fields and ordered slots, without mutating the draft", async () => {
+        const input = batch(); const original = structuredClone(input);
+        const preview = { canCreate: true, items: [{ index: 0, startsAtUtc: "a", endsAtUtc: "b", status: "Ok", message: null }] };
+        fetcher.mockResolvedValue(json(preview));
+        expect(await previewSessionBatch(input)).toEqual(preview);
+        const [url, init] = fetcher.mock.calls[0];
+        expect(url).toBe("/api/academic/sessions/batch/preview");
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({ classId, unit: "Unit 1", lesson: "Bài học", skills: ["Listening", "Speaking"],
+            sessionType: "Regular", examSlot: null, slots: batchSlots(input) });
+        expect(input).toEqual(original);
+    });
+
+    it("POSTs create to the batch endpoint exactly once and returns the created sessions", async () => {
+        fetcher.mockResolvedValue(json([item], 201));
+        expect(await createSessionBatch(batch())).toEqual([item]);
+        expect(fetcher).toHaveBeenCalledTimes(1);
+        const [url, init] = fetcher.mock.calls[0];
+        expect(url).toBe("/api/academic/sessions/batch");
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body)).slots).toHaveLength(2);
+    });
+
+    it.each([previewSessionBatch, createSessionBatch])("rejects an invalid draft before any request", async (send) => {
+        await expect(send(batch({ dates: [] }))).rejects.toMatchObject({ status: 400, errors: { dates: expect.any(Array) } });
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it("surfaces a 409 conflict with per-slot errors and never retries the write", async () => {
+        const errors = { "Slots[1]": ["Teacher already has an overlapping session."] };
+        fetcher.mockResolvedValue(json({ title: errors["Slots[1]"][0], errors }, 409));
+        await expect(createSessionBatch(batch())).rejects.toMatchObject({
+            status: 409, errors: { "Slots[1]": ["Giáo viên đã có buổi học trùng giờ."] },
+        });
+        expect(fetcher).toHaveBeenCalledTimes(1);
     });
 });

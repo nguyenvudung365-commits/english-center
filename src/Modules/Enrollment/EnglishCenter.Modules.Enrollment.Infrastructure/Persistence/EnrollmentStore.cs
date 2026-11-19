@@ -70,6 +70,11 @@ internal sealed class EnrollmentStore(EnrollmentDbContext db) : IEnrollmentStore
         await db.Enrollments.AsNoTracking().Where(x => x.ClassId == classId && x.Status == "Active" && x.IsActive)
             .Select(x => x.StudentId).Distinct().OrderBy(x => x).ToListAsync(ct);
 
+    public async Task<IReadOnlyList<Guid>> TransferredClassIdsAsync(Guid studentId, CancellationToken ct) =>
+        await db.Enrollments.Where(x => x.StudentId == studentId && x.Status == "Cancelled" &&
+            db.Enrollments.Any(target => target.TransferredFromEnrollmentId == x.Id && target.StudentId == studentId))
+            .Select(x => x.ClassId).ToListAsync(ct);
+
     public async Task<Registration> SetActiveAsync(Guid id, bool active, CancellationToken ct)
     {
         var changed = await db.Enrollments.Where(x => x.Id == id && (!active || x.Status == "Active"))
@@ -116,6 +121,49 @@ internal sealed class EnrollmentStore(EnrollmentDbContext db) : IEnrollmentStore
             await tx.RollbackAsync(ct);
             db.ChangeTracker.Clear();
             throw new EnrollmentFailure(409, "Student is already enrolled in this class.");
+        }
+        return value;
+    }
+
+    public async Task<Registration> TransferAsync(Guid sourceId, Guid targetClassId, DateTime now, DateOnly today, CancellationToken ct)
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var source = await FindAsync(sourceId, ct) ?? throw new EnrollmentFailure(404, "Enrollment not found.");
+        if (source.ClassId == targetClassId) throw new EnrollmentFailure(400, "Choose a different class.");
+        var target = await db.Classes.AsNoTracking().SingleOrDefaultAsync(x => x.ClassId == targetClassId, ct)
+            ?? throw new EnrollmentFailure(404, "Destination class not found.");
+        if (target.EndDate < today) throw new EnrollmentFailure(400, "Destination class has ended.");
+        if (await db.Enrollments.AnyAsync(x => x.StudentId == source.StudentId && x.ClassId == targetClassId, ct))
+            throw new EnrollmentFailure(409, "Student already has an enrollment in the destination class.");
+
+        var cancelled = await db.Enrollments.Where(x => x.Id == sourceId && x.Status == "Active")
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, "Cancelled").SetProperty(x => x.IsActive, false), ct);
+        if (cancelled == 0) throw new EnrollmentFailure(409, "Source enrollment is no longer active.");
+        source = (await FindAsync(sourceId, ct))!;
+
+        // Use one lock order for both classes even when transfers run in opposite directions.
+        foreach (var id in new[] { source.ClassId, targetClassId }.Order())
+        {
+            var delta = id == targetClassId ? 1 : -1;
+            var updated = await db.Classes.Where(x => x.ClassId == id &&
+                    (delta == 1 ? x.CurrentStudents < x.MaxStudents : x.CurrentStudents > 0))
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.CurrentStudents, x => x.CurrentStudents + delta), ct);
+            if (updated == 0) throw new EnrollmentFailure(409, delta == 1 ? "Destination class is full." : "Source seat could not be released.");
+        }
+
+        var value = new Registration(source.StudentId, target.ClassId, target.TuitionFee, now,
+            source.MaxAbsences, source.MaxLates, source.MaxSkippedAssignments, source.Id);
+        db.Enrollments.Add(value);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+        }
+        catch (DbUpdateException e) when (e.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            await tx.RollbackAsync(ct);
+            db.ChangeTracker.Clear();
+            throw new EnrollmentFailure(409, "Student already has an enrollment in the destination class.");
         }
         return value;
     }

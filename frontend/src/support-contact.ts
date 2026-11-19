@@ -1,3 +1,8 @@
+export function supportEmail(value?: string) {
+    const email = value?.trim() ?? "";
+    return email.length <= 254 && /^[a-z\d_+.-]+@[a-z\d-]+(?:\.[a-z\d-]+)+$/i.test(email) ? email : null;
+}
+
 export function zaloSupportUrl(value?: string) {
     try {
         const url = new URL(value?.trim() ?? "");

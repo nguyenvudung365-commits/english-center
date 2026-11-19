@@ -43,6 +43,7 @@ public sealed class Registration
     public DateTime EnrolledAt { get; private set; }
     // Lưu học phí tại lúc ghi danh để đối soát/phát lại event.
     public decimal TuitionFee { get; private set; }
+    public Guid? TransferredFromEnrollmentId { get; private set; }
     public int MaxAbsences { get; private set; }
     public int MaxLates { get; private set; }
     public int MaxSkippedAssignments { get; private set; }
@@ -50,12 +51,14 @@ public sealed class Registration
     public int LateCount { get; private set; }
     public int SkippedAssignmentCount { get; private set; }
     private Registration() { }
-    public Registration(Guid student, Guid classId, decimal tuition, DateTime at, int absences, int lates, int skipped)
+    public Registration(Guid student, Guid classId, decimal tuition, DateTime at, int absences, int lates, int skipped,
+        Guid? transferredFromEnrollmentId = null)
     {
         if (student == Guid.Empty || classId == Guid.Empty || !ValidAmount(tuition) || at.Kind != DateTimeKind.Utc ||
             absences < 0 || lates < 0 || skipped < 0) throw new ArgumentException("Invalid enrollment.");
         Id = Guid.NewGuid(); StudentId = student; ClassId = classId; TuitionFee = tuition; EnrolledAt = at;
         MaxAbsences = absences; MaxLates = lates; MaxSkippedAssignments = skipped;
+        TransferredFromEnrollmentId = transferredFromEnrollmentId;
     }
     public static bool ValidAmount(decimal value) => value >= 0 && value <= 999_999_999_999m && decimal.Truncate(value) == value;
 

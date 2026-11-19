@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ApiError, getSession, getSessionGeneration, identity } from "./api";
 import { isAcademicId } from "./academic";
 import { useRead } from "./academic-pages";
@@ -10,6 +10,7 @@ import { formatDateOnly, formatVnDateTime, formatVnd } from "./format";
 import { ErrorMessage, FieldError, fieldProps, PageHeading, Pager } from "./ui";
 
 export function Invoices() {
+    const [params] = useSearchParams();
     const user = identity(getSession());
     if (!user) return null;
     if (!canReadInvoices(user.role))
@@ -17,13 +18,15 @@ export function Invoices() {
             <PageHeading title="Hóa đơn & học phí" subtitle="Hóa đơn được giáo vụ, quản trị viên và học viên liên quan xem." />
             <section className="panel"><p role="status">Tài khoản giáo viên không có quyền xem hóa đơn.</p></section>
         </>;
-    return <InvoiceWorkspace key={`${getSessionGeneration()}:${user.id}`} role={user.role} />;
+    const requested = params.get("studentId") ?? "";
+    const studentId = user.role !== "Student" && isAcademicId(requested) ? requested : "";
+    return <InvoiceWorkspace key={`${getSessionGeneration()}:${user.id}:${studentId}`} role={user.role} studentId={studentId} />;
 }
 
-function InvoiceWorkspace({ role }: { role: import("./api").Role }) {
+function InvoiceWorkspace({ role, studentId }: { role: import("./api").Role; studentId: string }) {
     const manager = role !== "Student";
-    const [input, setInput] = useState("");
-    const [query, setQuery] = useState({ studentId: "", page: 1 });
+    const [input, setInput] = useState(studentId);
+    const [query, setQuery] = useState({ studentId, page: 1 });
     const [version, setVersion] = useState(0);
     const load = useCallback(() => listInvoices({ studentId: query.studentId, page: query.page }), [query, version]);
     const result = useRead(load);

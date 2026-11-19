@@ -14,6 +14,7 @@ public sealed class EnrollmentFailure(int status, string message) : Exception(me
 
 // Giáo vụ nhập rõ giới hạn; không tự gán mặc định chưa được xác nhận trong nghiệp vụ.
 public sealed record EnrollRequest(Guid StudentId, Guid ClassId, int? MaxAbsences, int? MaxLates, int? MaxSkippedAssignments);
+public sealed record TransferEnrollmentRequest(Guid TargetClassId);
 public sealed record EnrollmentResponse(Guid Id, Guid StudentId, Guid ClassId, string Status, DateTime EnrolledAtUtc,
     decimal TuitionFee, int MaxAbsences, int MaxLates, int MaxSkippedAssignments, bool IsActive = true);
 public sealed record EnrollmentStatisticsResponse(int CompletedClasses);
@@ -25,10 +26,12 @@ public interface IEnrollmentStore
     Task AddStudentAsync(Student student, CancellationToken ct);
     Task AddClassAsync(ClassSnapshot value, CancellationToken ct);
     Task<Registration> EnrollAsync(EnrollRequest request, DateTime now, DateOnly today, CancellationToken ct);
+    Task<Registration> TransferAsync(Guid sourceId, Guid targetClassId, DateTime now, DateOnly today, CancellationToken ct);
     Task<Registration?> FindAsync(Guid id, CancellationToken ct);
     Task<Registration?> FindAsync(Guid classId, Guid studentId, CancellationToken ct);
     Task<IReadOnlyList<Registration>> ListAsync(Guid classId, CancellationToken ct);
     Task<IReadOnlyList<Guid>> ListActiveStudentIdsAsync(Guid classId, CancellationToken ct);
+    Task<IReadOnlyList<Guid>> TransferredClassIdsAsync(Guid studentId, CancellationToken ct);
     Task<Registration> SetActiveAsync(Guid id, bool active, CancellationToken ct);
     Task<int> CountCompletedClassesAsync(Guid studentId, DateOnly today, CancellationToken ct);
     Task<PageResult<MyEnrollmentResponse>> ListMineAsync(Guid studentId, int page, int size, CancellationToken ct);
@@ -69,8 +72,20 @@ public sealed class EnrollmentService(IEnrollmentStore store, IEventBus events, 
             throw new EnrollmentFailure(400, "StudentId, ClassId and three non-negative limits are required.");
         var now = clock.GetUtcNow();
         // PostgreSQL timestamptz lưu microsecond; phản hồi POST và GET phải cùng độ chính xác.
-        var enrolledAt = new DateTime(now.UtcDateTime.Ticks / 10 * 10, DateTimeKind.Utc);
-        var value = await store.EnrollAsync(request, enrolledAt, LocalDate(now), ct);
+        var value = await store.EnrollAsync(request, EnrollmentTime(now), LocalDate(now), ct);
+        await PublishAsync(value, ct);
+        return Response(value);
+    }
+
+    public async Task<EnrollmentResponse> TransferAsync(Guid id, TransferEnrollmentRequest request, CancellationToken ct)
+    {
+        await EnsureManagerAsync(ct);
+        if (request.TargetClassId == Guid.Empty) throw new EnrollmentFailure(400, "Target class is required.");
+        var source = await store.FindAsync(id, ct) ?? throw new EnrollmentFailure(404, "Enrollment not found.");
+        if (!await accounts.IsActiveInRoleAsync(source.StudentId, Roles.Student, ct))
+            throw new EnrollmentFailure(409, "Student account is not active.");
+        var now = clock.GetUtcNow();
+        var value = await store.TransferAsync(id, request.TargetClassId, EnrollmentTime(now), LocalDate(now), ct);
         await PublishAsync(value, ct);
         return Response(value);
     }
@@ -114,10 +129,12 @@ public sealed class EnrollmentService(IEnrollmentStore store, IEventBus events, 
     }
 
     private Task PublishAsync(Registration value, CancellationToken ct) => events.PublishAsync(
-        new StudentEnrolledIntegrationEvent(value.Id, value.StudentId, value.ClassId, value.TuitionFee, value.EnrolledAt), ct);
+        new StudentEnrolledIntegrationEvent(value.Id, value.StudentId, value.ClassId, value.TuitionFee, value.EnrolledAt,
+            SkipInvoice: value.TransferredFromEnrollmentId is not null), ct);
     internal static EnrollmentResponse Response(Registration x) => new(x.Id, x.StudentId, x.ClassId, x.Status,
         x.EnrolledAt, x.TuitionFee, x.MaxAbsences, x.MaxLates, x.MaxSkippedAssignments,
         x.Status == "Active" && x.IsActive);
     private static DateOnly LocalDate(DateTimeOffset instant) =>
         DateOnly.FromDateTime(instant.ToOffset(TimeSpan.FromHours(7)).DateTime);
+    private static DateTime EnrollmentTime(DateTimeOffset instant) => new(instant.UtcTicks / 10 * 10, DateTimeKind.Utc);
 }

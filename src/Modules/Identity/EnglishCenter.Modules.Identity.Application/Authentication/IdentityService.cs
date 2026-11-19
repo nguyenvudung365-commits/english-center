@@ -50,7 +50,7 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
         if (expectedSession is not null && session.Id != expectedSession) throw InvalidCredentials();
         var user = await store.FindUserAsync(session.UserId, ct);
         if (user is null || user.IsLocked) throw InvalidCredentials();
-        var response = tokens.Issue(user, clock.GetUtcNow());
+        var response = tokens.Issue(user, session.Id, clock.GetUtcNow());
         // Keep the browser session identity stable while rotating its single-use credential.
         session.Rotate(tokens.HashRefreshToken(response.RefreshToken), response.RefreshTokenExpiresAt);
         user.Touch();
@@ -92,14 +92,23 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
 
     public async Task<UserResponse> CreateUserAsync(CreateUserRequest request, CancellationToken ct)
     {
-        var manager = await RequireActiveUserAsync(ct);
-        if (manager.Role is not (Roles.Admin or Roles.Staff))
-            throw new IdentityFailure(403, "Only Admin or Staff can create accounts.");
-        request = request with { Email = request.Email?.Trim()!, FullName = request.FullName?.Trim()!, Phone = NormalizePhone(request.Phone) };
-        Validate(request);
+        await RequireManagerAsync(ct);
         if (request.Role is not (Roles.Student or Roles.Teacher))
             throw new IdentityFailure(400, "Only Student or Teacher accounts can be created through this endpoint.");
-        return await CreateAsync(request, ct);
+        return await CreateManagedAsync(request, ct);
+    }
+
+    public async Task<UserResponse> ProvisionStaffAsync(ProvisionStaffRequest request, CancellationToken ct)
+    {
+        await RequireAdminAsync(ct);
+        return await CreateManagedAsync(new CreateUserRequest(request.Email, request.FullName, request.Password, Roles.Staff, request.Phone), ct);
+    }
+
+    private Task<UserResponse> CreateManagedAsync(CreateUserRequest request, CancellationToken ct)
+    {
+        request = request with { Email = request.Email?.Trim()!, FullName = request.FullName?.Trim()!, Phone = VietnamMobile.Normalize(request.Phone) };
+        Validate(request);
+        return CreateAsync(request, ct);
     }
 
     public async Task<ProfileResponse> GetProfileAsync(CancellationToken ct) =>
@@ -108,15 +117,13 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
     public async Task<ProfileResponse> UpdateProfileAsync(UpdateProfileRequest request, CancellationToken ct)
     {
         var user = await RequireActiveUserAsync(ct);
-        request = request with { Email = request.Email?.Trim()!, FullName = request.FullName?.Trim()!, Phone = NormalizePhone(request.Phone) };
+        request = request with { Email = request.Email?.Trim()!, FullName = request.FullName?.Trim()!, Phone = VietnamMobile.Normalize(request.Phone, user.Phone) };
         Validate(request);
         if (request.ExpectedRevision == Guid.Empty)
             throw FieldError(nameof(request.ExpectedRevision), "A valid expected revision is required.");
         if (request.ExpectedRevision != user.Revision)
             throw new IdentityFailure(409, "Profile changed. Reload before saving.");
-        var existing = await store.FindByEmailAsync(User.NormalizeEmail(request.Email), ct);
-        if (existing is not null && existing.Id != user.Id)
-            throw new IdentityFailure(409, "Email is already registered.");
+        await EnsureEmailAvailableAsync(user, request.Email, ct);
 
         AvatarDownload? avatar = null;
         if (request.AvatarFileId is { } fileId)
@@ -141,11 +148,12 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
 
     public async Task<ManagedTeacher> UpdateTeacherAsync(Guid id, UpdateTeacherRequest request, CancellationToken ct)
     {
-        var user = await RequireTeacherAsync(id, request.ExpectedRevision, ct);
-        request = request with { FullName = request.FullName?.Trim()!, Email = request.Email?.Trim()!, Phone = NormalizePhone(request.Phone) };
+        await RequireAdminAsync(ct);
+        var user = await FindManagedAccountAsync(id, Roles.Teacher, ct);
+        RequireRevision(user, request.ExpectedRevision);
+        request = request with { FullName = request.FullName?.Trim()!, Email = request.Email?.Trim()!, Phone = VietnamMobile.Normalize(request.Phone, user.Phone) };
         Validate(request);
-        var existing = await store.FindByEmailAsync(User.NormalizeEmail(request.Email), ct);
-        if (existing is not null && existing.Id != user.Id) throw new IdentityFailure(409, "Email is already registered.");
+        await EnsureEmailAvailableAsync(user, request.Email, ct);
         var version = user.ProfileVersion;
         user.UpdateProfile(request.FullName, request.Email, request.Phone, user.AvatarFileId);
         await store.SaveAsync(ct);
@@ -155,33 +163,103 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
 
     public async Task<ManagedTeacher> SetTeacherLockAsync(Guid id, TeacherLockRequest request, CancellationToken ct)
     {
-        var user = await RequireTeacherAsync(id, request.ExpectedRevision, ct);
+        var user = await SetAccountLockAsync(id, Roles.Teacher, new AccountLockRequest(request.IsLocked, request.ExpectedRevision), ct);
+        return Teacher(user);
+    }
+
+    public async Task<ManagedAccountPage> ListStudentsAsync(string? q, int page, int pageSize, CancellationToken ct)
+    {
+        await RequireManagerAsync(ct);
+        return await ListManagedAccountsAsync(Roles.Student, q, page, pageSize, ct);
+    }
+
+    public async Task<ManagedAccountPage> ListStaffAsync(string? q, int page, int pageSize, CancellationToken ct)
+    {
+        await RequireAdminAsync(ct);
+        return await ListManagedAccountsAsync(Roles.Staff, q, page, pageSize, ct);
+    }
+
+    private Task<ManagedAccountPage> ListManagedAccountsAsync(string role, string? q, int page, int pageSize, CancellationToken ct)
+    {
+        var query = q?.Trim() ?? string.Empty;
+        if (query.Length > 200) throw FieldError("q", "Search term cannot exceed 200 characters.");
+        if (pageSize is < 1 or > 100) throw FieldError("pageSize", "Page size must be between 1 and 100.");
+        if (page is < 1 or > 100000) throw FieldError("page", "Page must be between 1 and 100000.");
+        return store.ListManagedAccountsAsync(role, query, VietnamMobile.CanonicalNumber(query)?[3..], page, pageSize, ct);
+    }
+
+    public async Task<ManagedAccount> GetStudentAsync(Guid id, CancellationToken ct)
+    {
+        await RequireManagerAsync(ct);
+        return Managed(await FindManagedAccountAsync(id, Roles.Student, ct));
+    }
+
+    public async Task<ManagedAccount> UpdateStudentContactAsync(Guid id, UpdateStudentContactRequest request, CancellationToken ct)
+    {
+        await RequireManagerAsync(ct);
+        var user = await FindManagedAccountAsync(id, Roles.Student, ct);
+        RequireRevision(user, request.ExpectedRevision);
+        request = request with { FullName = request.FullName?.Trim()!, Email = request.Email?.Trim()!, Phone = VietnamMobile.Normalize(request.Phone, user.Phone) };
         Validate(request);
-        if (user.IsLocked == request.IsLocked!.Value) return Teacher(user);
+        await EnsureEmailAvailableAsync(user, request.Email, ct);
+        user.UpdateProfile(request.FullName, request.Email, request.Phone, user.AvatarFileId);
+        await store.SaveAsync(ct);
+        return Managed(user);
+    }
+
+    public async Task<ManagedAccount> SetStudentLockAsync(Guid id, AccountLockRequest request, CancellationToken ct) =>
+        Managed(await SetAccountLockAsync(id, Roles.Student, request, ct));
+
+    public async Task<ManagedAccount> SetStaffLockAsync(Guid id, AccountLockRequest request, CancellationToken ct) =>
+        Managed(await SetAccountLockAsync(id, Roles.Staff, request, ct));
+
+    private async Task<User> SetAccountLockAsync(Guid id, string role, AccountLockRequest request, CancellationToken ct)
+    {
+        await RequireAdminAsync(ct);
+        var user = await FindManagedAccountAsync(id, role, ct);
+        RequireRevision(user, request.ExpectedRevision);
+        Validate(request);
+        if (user.IsLocked == request.IsLocked!.Value) return user;
         user.SetLocked(request.IsLocked.Value);
         if (user.IsLocked)
             foreach (var session in await store.SessionsAsync(id, ct)) session.Revoke(clock.GetUtcNow());
         await store.SaveAsync(ct);
-        return Teacher(user);
+        return user;
     }
 
     private async Task RequireAdminAsync(CancellationToken ct)
     {
         if ((await RequireActiveUserAsync(ct)).Role != Roles.Admin)
-            throw new IdentityFailure(403, "Only Admin can manage teachers.");
+            throw new IdentityFailure(403, "Only Admin can perform this operation.");
     }
 
-    private async Task<User> RequireTeacherAsync(Guid id, Guid? revision, CancellationToken ct)
+    private async Task RequireManagerAsync(CancellationToken ct)
     {
-        await RequireAdminAsync(ct);
+        if ((await RequireActiveUserAsync(ct)).Role is not (Roles.Admin or Roles.Staff))
+            throw new IdentityFailure(403, "Only Admin or Staff can perform this operation.");
+    }
+
+    private async Task<User> FindManagedAccountAsync(Guid id, string role, CancellationToken ct)
+    {
         var user = await store.FindUserAsync(id, ct);
-        if (user is null || user.Role != Roles.Teacher) throw new IdentityFailure(404, "Teacher account not found.");
-        if (revision is null || revision == Guid.Empty) throw FieldError("ExpectedRevision", "A valid expected revision is required.");
-        if (user.Revision != revision) throw new IdentityFailure(409, "Account changed. Reload before saving.");
+        if (user is null || user.Role != role) throw new IdentityFailure(404, "Account not found.");
         return user;
     }
 
+    private static void RequireRevision(User user, Guid? revision)
+    {
+        if (revision is null || revision == Guid.Empty) throw FieldError("ExpectedRevision", "A valid expected revision is required.");
+        if (user.Revision != revision) throw new IdentityFailure(409, "Account changed. Reload before saving.");
+    }
+
+    private async Task EnsureEmailAvailableAsync(User user, string email, CancellationToken ct)
+    {
+        var existing = await store.FindByEmailAsync(User.NormalizeEmail(email), ct);
+        if (existing is not null && existing.Id != user.Id) throw new IdentityFailure(409, "Email is already registered.");
+    }
+
     private static ManagedTeacher Teacher(User user) => new(user.Id, user.FullName, user.Email, user.Phone, user.IsLocked, user.Revision);
+    private static ManagedAccount Managed(User user) => new(user.Id, user.FullName, user.Email, user.Phone, user.StudentCode, user.IsLocked, user.Revision);
 
     private async Task PublishProfileAsync(User user, long oldVersion, CancellationToken ct)
     {
@@ -222,7 +300,6 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
         user.FullName, user.Email, user.Phone, user.Role == Roles.Student ? user.StudentCode : null,
         user.AvatarFileId, avatar?.Url, avatar?.ExpiresAt, user.Revision);
 
-    private static string? NormalizePhone(string? phone) => string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
     private static IdentityFailure FieldError(string field, string message) => new(400,
         "One or more validation errors occurred.", new Dictionary<string, string[]> { [field] = [message] });
 
@@ -260,9 +337,10 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
 
     private TokenResponse Issue(User user, out RefreshSession session)
     {
-        var response = tokens.Issue(user, clock.GetUtcNow());
+        var sessionId = Guid.NewGuid();
+        var response = tokens.Issue(user, sessionId, clock.GetUtcNow());
         user.Touch();
-        session = RefreshSession.Create(user.Id, tokens.HashRefreshToken(response.RefreshToken), response.RefreshTokenExpiresAt);
+        session = RefreshSession.Create(sessionId, user.Id, tokens.HashRefreshToken(response.RefreshToken), response.RefreshTokenExpiresAt);
         store.AddSession(session);
         return response;
     }

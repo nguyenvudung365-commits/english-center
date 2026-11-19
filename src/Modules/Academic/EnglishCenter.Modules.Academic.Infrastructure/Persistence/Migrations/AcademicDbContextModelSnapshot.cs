@@ -74,6 +74,28 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("opens_at_utc");
 
+                    b.Property<string>("PromptContentType")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("prompt_content_type");
+
+                    b.Property<Guid?>("PromptFileId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("prompt_file_id");
+
+                    b.Property<string>("PromptFileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("prompt_file_name");
+
+                    b.Property<Guid?>("PromptOwnerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("prompt_owner_id");
+
+                    b.Property<long?>("PromptSizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("prompt_size_bytes");
+
                     b.Property<DateTimeOffset?>("PublishedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("published_at");
@@ -118,7 +140,9 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
 
                     b.ToTable("assignments", "academic", t =>
                         {
-                            t.HasCheckConstraint("ck_assignments_kind", "kind IN ('InClass', 'Homework')");
+                            t.HasCheckConstraint("ck_assignments_exam_prompt", "kind <> 'Exam' OR prompt_file_id IS NOT NULL");
+
+                            t.HasCheckConstraint("ck_assignments_kind", "kind IN ('InClass', 'Homework', 'Exam')");
 
                             t.HasCheckConstraint("ck_assignments_window", "closes_at_utc > opens_at_utc");
                         });
@@ -162,11 +186,79 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.ClassMaterial", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("class_id");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("content_type");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("description");
+
+                    b.Property<Guid>("FileId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("file_id");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("file_name");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("size_bytes");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("title");
+
+                    b.Property<Guid>("UploadedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("uploaded_by");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FileId")
+                        .IsUnique();
+
+                    b.HasIndex("ClassId", "CreatedAt");
+
+                    b.ToTable("class_materials", "academic", t =>
+                        {
+                            t.HasCheckConstraint("ck_class_materials_size", "size_bytes > 0 AND size_bytes <= 20971520");
+                        });
+                });
+
             modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.Submission", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
                         .HasColumnName("id");
+
+                    b.Property<string>("AnswerText")
+                        .HasMaxLength(10000)
+                        .HasColumnType("character varying(10000)")
+                        .HasColumnName("answer_text");
 
                     b.Property<Guid>("AssignmentId")
                         .HasColumnType("uuid")
@@ -834,6 +926,15 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                     b.HasOne("EnglishCenter.Modules.Academic.Domain.Assignments.Assignment", null)
                         .WithMany()
                         .HasForeignKey("AssignmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("EnglishCenter.Modules.Academic.Domain.Assignments.ClassMaterial", b =>
+                {
+                    b.HasOne("EnglishCenter.Modules.Academic.Domain.Classes.Class", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

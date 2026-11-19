@@ -17,6 +17,7 @@ public static class DependencyInjection
         services.AddScoped<ClassService>();
         services.AddScoped<ClassAccess>();
         services.AddScoped<Sessions.SessionService>();
+        services.AddScoped<Sessions.SessionBatchService>();
         services.AddScoped<Attendance.AttendanceService>();
         services.AddScoped<Statistics.StatisticsService>();
         services.AddScoped<EnglishCenter.Modules.Academic.Contracts.ISessionDirectory, Sessions.SessionDirectory>();
@@ -25,6 +26,7 @@ public static class DependencyInjection
         services.AddScoped<CourseworkEvents>();
         services.AddScoped<AssignmentService>();
         services.AddScoped<GradingService>();
+        services.AddScoped<MaterialService>();
         services.AddScoped<CourseworkReconciler>();
         services.AddScoped<PracticeService>();
         services.AddScoped<CourseworkDirectory>();

@@ -1,3 +1,5 @@
+import { localizeSystemMessage } from "./api-messages";
+
 export type Role = "Admin" | "Staff" | "Teacher" | "Student";
 export type Session = {
     accessToken: string;
@@ -12,6 +14,7 @@ export class ApiError extends Error {
         public status: number,
         message: string,
         public errors: Record<string, string[]> = {},
+        public serverTitle?: string,
     ) {
         super(message);
     }
@@ -20,7 +23,7 @@ export class ApiError extends Error {
 // The access token stays in memory. The refresh token is an HttpOnly browser-session cookie that scripts cannot
 // read; "X-Session-Mode: cookie" opts the auth calls into it. A reload restores the session via restoreSession().
 const browserMode = { "X-Session-Mode": "cookie" };
-export type AuthState = "restoring" | "ready" | "unavailable" | "logout-pending";
+export type AuthState = "restoring" | "ready" | "unavailable" | "rate-limited" | "logout-pending";
 let authState: AuthState = "restoring";
 let restoring: Promise<void> | null = null;
 let session: Session | null = null;
@@ -91,19 +94,32 @@ export function identity(
 }
 async function response<T>(result: Response): Promise<T> {
     if (!result.ok) {
-        const problem = await result.json().catch(() => ({}));
+        const problem = await result.json().catch(() => null);
         const messages: Record<number, string> = {
             401: "Phiên đăng nhập không hợp lệ hoặc đã hết hạn.",
             403: "Bạn không có quyền thực hiện thao tác này.",
             429: "Bạn thao tác quá nhanh. Vui lòng thử lại sau.",
             500: "Máy chủ đang gặp sự cố. Vui lòng thử lại.",
         };
+        const fallbacks: Record<number, string> = {
+            400: "Dữ liệu chưa hợp lệ. Vui lòng kiểm tra lại.",
+            404: "Không tìm thấy nội dung yêu cầu.",
+            409: "Không thể lưu do dữ liệu bị trùng hoặc đã thay đổi. Hãy kiểm tra và thử lại.",
+        };
+        const title = typeof problem?.title === "string" ? problem.title : undefined;
+        const fields = problem?.errors;
+        const errors = fields && typeof fields === "object" && !Array.isArray(fields)
+            ? Object.fromEntries(Object.entries(fields).flatMap(([field, values]) =>
+                Array.isArray(values) && values.length > 0
+                    ? [[field, [...new Set(values.map(value => localizeSystemMessage(value, "Giá trị này không hợp lệ. Vui lòng kiểm tra lại.")))]]]
+                    : []))
+            : {};
         throw new ApiError(
             result.status,
-            messages[result.status] ??
-                problem.title ??
-                "Không thể hoàn tất yêu cầu.",
-            problem.errors ?? {},
+            messages[result.status] ?? localizeSystemMessage(title, fallbacks[result.status] ?? (result.status >= 500
+                ? "Máy chủ đang gặp sự cố. Vui lòng thử lại." : "Không thể hoàn tất yêu cầu.")),
+            errors,
+            title,
         );
     }
     return result.status === 204 ? (undefined as T) : result.json();
@@ -278,6 +294,7 @@ export function restoreSession(): Promise<void> {
             } catch (error) {
                 if (version !== generation) return setAuthState("ready");
                 if (readPendingLogout()) return setAuthState("logout-pending");
+                if (error instanceof ApiError && error.status === 429) return setAuthState("rate-limited");
                 const retryable = error instanceof ApiError && (error.status === 0 || error.status >= 500);
                 if (retryable && attempt < 2) {
                     await new Promise((done) => setTimeout(done, 600 * 2 ** attempt));

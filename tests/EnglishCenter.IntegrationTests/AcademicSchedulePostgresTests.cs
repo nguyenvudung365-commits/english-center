@@ -96,12 +96,21 @@ public sealed class AcademicSchedulePostgresTests : IAsyncLifetime
         }
         Assert.Equal("academic.sessions", await ScalarAsync("SELECT to_regclass('academic.sessions')::text"));
         foreach (var table in tables) Assert.Equal(before[table], await TableSnapshotAsync(table));
+        Assert.Equal("0", await ScalarAsync("SELECT count(*)::text FROM academic.submissions WHERE answer_text IS NOT NULL"));
+        Assert.Equal("0", await ScalarAsync("""
+            SELECT count(*)::text FROM academic.assignments
+            WHERE prompt_content_type IS NOT NULL OR prompt_file_id IS NOT NULL OR prompt_file_name IS NOT NULL
+              OR prompt_owner_id IS NOT NULL OR prompt_size_bytes IS NOT NULL
+            """));
         Assert.Equal("0", await ScalarAsync("SELECT count(*)::text FROM academic.courses WHERE is_retired IS DISTINCT FROM false"));
         Assert.Equal("0", await ScalarAsync("SELECT count(*)::text FROM academic.sessions"));
     }
 
     [PostgresFact]
     public Task SameTeacherDifferentClasses_ConcurrentOverlap_OnlyOneBookingCommits() => RaceAsync("overlap");
+
+    [PostgresFact]
+    public Task ConcurrentSingleBookingAndBatch_OneOverlapRejectsEntireBatch() => RaceAsync("overlap", batchContender: true);
 
     [PostgresFact]
     public Task SameTeacherDifferentClasses_ConcurrentAdjacent_BothCommit() => RaceAsync("adjacent");
@@ -239,7 +248,7 @@ public sealed class AcademicSchedulePostgresTests : IAsyncLifetime
         }
     }
 
-    private async Task RaceAsync(string kind)
+    private async Task RaceAsync(string kind, bool batchContender = false)
     {
         var rendezvous = new TeacherLockProbe();
         await using var fixture = new AcademicScheduleFixture(Connection, rendezvous);
@@ -248,6 +257,21 @@ public sealed class AcademicSchedulePostgresTests : IAsyncLifetime
         using var secondClient = fixture.CreateClient();
         await fixture.AsAsync("staff", firstClient);
         await fixture.AsAsync("admin", secondClient);
+        var batch = new
+        {
+            classId = fixture.Second, unit = "Unit 1", lesson = "Batch race", skills = new[] { "Listening" }, sessionType = "Regular",
+            slots = new[]
+            {
+                new { startsAtUtc = "2027-01-01T12:00:00Z", endsAtUtc = "2027-01-01T13:00:00Z" },
+                new { startsAtUtc = "2027-01-01T10:00:00Z", endsAtUtc = "2027-01-01T11:00:00Z" },
+            },
+        };
+        if (batchContender)
+        {
+            using var preview = await secondClient.PostAsJsonAsync(AcademicScheduleFixture.SessionsUrl + "/batch/preview", batch);
+            Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+            Assert.True((await AcademicScheduleFixture.JsonAsync(preview)).GetProperty("canCreate").GetBoolean());
+        }
         var teachersBefore = await TableSnapshotAsync("teachers");
         rendezvous.Enabled = true;
         // Hold the first transaction AFTER its real teacher UPDATE has acquired the row lock.
@@ -259,7 +283,8 @@ public sealed class AcademicSchedulePostgresTests : IAsyncLifetime
             try
             {
                 var holder = await RequireSignalAsync(rendezvous.FirstLocked.Task, first);
-                second = secondClient.PostAsJsonAsync(AcademicScheduleFixture.SessionsUrl,
+                second = batchContender ? secondClient.PostAsJsonAsync(AcademicScheduleFixture.SessionsUrl + "/batch", batch)
+                    : secondClient.PostAsJsonAsync(AcademicScheduleFixture.SessionsUrl,
                     fixture.Body(kind == "different-teachers" ? fixture.Other : fixture.Second,
                         kind == "adjacent" ? "2027-01-01T11:00:00Z" : "2027-01-01T10:00:00Z",
                         kind == "adjacent" ? "2027-01-01T12:00:00Z" : "2027-01-01T11:00:00Z"));
@@ -285,7 +310,12 @@ public sealed class AcademicSchedulePostgresTests : IAsyncLifetime
             var statuses = responses.Select(x => x.StatusCode).Order().ToArray();
             Assert.Equal(kind == "overlap" ? new[] { HttpStatusCode.Created, HttpStatusCode.Conflict } :
                 new[] { HttpStatusCode.Created, HttpStatusCode.Created }, statuses);
-            AssertTransactions(rendezvous.Commands.ToArray(), kind == "overlap" ? 1 : 2);
+            if (batchContender)
+            {
+                Assert.Equal(HttpStatusCode.Created, responses[0].StatusCode);
+                Assert.Equal(HttpStatusCode.Conflict, responses[1].StatusCode);
+            }
+            AssertTransactions(rendezvous.Commands.ToArray(), kind == "overlap" ? 1 : 2, batchContender);
             Assert.Equal(kind == "overlap" ? "1" : "2", await ScalarAsync("SELECT count(*)::text FROM academic.sessions"));
             Assert.Equal("0", await ScalarAsync("""
                 SELECT count(*)::text FROM academic.sessions a
@@ -332,7 +362,7 @@ public sealed class AcademicSchedulePostgresTests : IAsyncLifetime
         }
     }
 
-    private static void AssertTransactions(TeacherLockProbe.CommandEvidence[] commands, int expectedInserts)
+    private static void AssertTransactions(TeacherLockProbe.CommandEvidence[] commands, int expectedInserts, bool batchContender)
     {
         var locks = commands.Where(x => x.Kind == "Lock").ToArray();
         Assert.Equal(2, locks.Length);
@@ -343,14 +373,18 @@ public sealed class AcademicSchedulePostgresTests : IAsyncLifetime
         {
             Assert.NotNull(rowLock.Transaction);
             var inContext = commands.Where(x => x.Context == rowLock.Context).ToArray();
-            var overlap = Assert.Single(inContext, x => x.Kind == "Overlap");
-            Assert.Same(rowLock.Transaction, overlap.Transaction);
-            Assert.True(rowLock.Order < overlap.Order, "Overlap SELECT must follow the lock UPDATE in its transaction.");
+            var overlaps = inContext.Where(x => x.Kind == "Overlap").ToArray();
+            Assert.Equal(batchContender && rowLock == locks[1] ? 2 : 1, overlaps.Length);
+            Assert.All(overlaps, overlap =>
+            {
+                Assert.Same(rowLock.Transaction, overlap.Transaction);
+                Assert.True(rowLock.Order < overlap.Order, "Overlap SELECT must follow the lock UPDATE in its transaction.");
+            });
             Assert.Equal(rowLock.Order, inContext.Where(x => ReferenceEquals(x.Transaction, rowLock.Transaction)).Min(x => x.Order));
             foreach (var insert in inContext.Where(x => x.Kind == "Insert"))
             {
                 Assert.Same(rowLock.Transaction, insert.Transaction);
-                Assert.True(overlap.Order < insert.Order, "INSERT must follow overlap SELECT in the same transaction.");
+                Assert.True(overlaps.All(overlap => overlap.Order < insert.Order), "INSERT must follow overlap SELECT in the same transaction.");
             }
         }
     }
@@ -359,8 +393,8 @@ public sealed class AcademicSchedulePostgresTests : IAsyncLifetime
     private static string AddedColumns(string table) => table switch
     {
         "courses" => "'is_retired'",
-        "assignments" => "'created_at','created_by','is_legacy','kind','lesson','obligations_resolved_at','published_at','published_by','published_event_sent_at','session_id','unit','updated_at','version'",
-        "submissions" => "'feedback','grade_version','graded_by','score'",
+        "assignments" => "'created_at','created_by','is_legacy','kind','lesson','obligations_resolved_at','prompt_content_type','prompt_file_id','prompt_file_name','prompt_owner_id','prompt_size_bytes','published_at','published_by','published_event_sent_at','session_id','unit','updated_at','version'",
+        "submissions" => "'answer_text','feedback','grade_version','graded_by','score'",
         _ => "",
     };
 

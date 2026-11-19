@@ -116,7 +116,7 @@ public sealed class AcademicAttendanceTests : IAsyncLifetime
     {
         await fixture.Host.ChangeAccountAsync(actor, change);
         using var response = await fixture.PutAsync("Present", null);
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(change == "delete" ? HttpStatusCode.Unauthorized : HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]

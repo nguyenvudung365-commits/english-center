@@ -2,32 +2,33 @@ using EnglishCenter.Modules.Academic.Domain.Assignments;
 
 namespace EnglishCenter.Modules.Academic.Application.Assignments;
 
-// Kind: "InClass" (Trên lớp) | "Homework" (Về nhà, mặc định). Publish null/true = công bố ngay (giữ hành vi cũ của frontend),
+// Kind: "InClass" (Trên lớp) | "Homework" (Về nhà, mặc định) | "Exam" (bài thi file, bắt buộc PromptFileId). Publish null/true = công bố ngay (giữ hành vi cũ của frontend),
 // false = lưu nháp rồi gọi POST /{id}/publish.
 public sealed record CreateAssignmentRequest(Guid ClassId, string Title, string? Description, DateTimeOffset OpensAtUtc,
     DateTimeOffset ClosesAtUtc, string? Kind = null, string? Unit = null, string? Lesson = null, Guid? SessionId = null,
-    bool? Publish = null);
+    bool? Publish = null, Guid? PromptFileId = null);
+// PromptFileId: đề PDF đã xác nhận; purpose "exam" cho bài thi, "material" cho bài tập. null khi sửa = giữ đề hiện tại.
 public sealed record UpdateAssignmentRequest(string Title, string? Description, DateTimeOffset OpensAtUtc, DateTimeOffset ClosesAtUtc,
-    string? Kind, string? Unit, string? Lesson, Guid? SessionId, int? ExpectedVersion);
+    string? Kind, string? Unit, string? Lesson, Guid? SessionId, int? ExpectedVersion, Guid? PromptFileId = null);
 public sealed record PublishAssignmentRequest(int? ExpectedVersion);
-public sealed record SubmitAssignmentRequest(Guid[]? FileIds, Guid? ExpectedRevision);
+public sealed record SubmitAssignmentRequest(Guid[]? FileIds, Guid? ExpectedRevision, string? AnswerText = null);
 // ExpectedRevision: revision bài nộp giáo viên đang xem; học viên thay file sau đó → 409, phải xem lại bài mới.
 public sealed record GradeSubmissionRequest(decimal? Score, string? Feedback, int? ExpectedGradeVersion, Guid? ExpectedRevision = null);
 
 public sealed record AssignmentResponse(Guid Id, Guid ClassId, string Title, string Description, DateTimeOffset OpensAtUtc,
     DateTimeOffset ClosesAtUtc, string Kind, string? Unit, string? Lesson, Guid? SessionId, bool IsLegacy, string Status,
-    DateTimeOffset? PublishedAt, DateTimeOffset? CreatedAt, int Version);
+    DateTimeOffset? PublishedAt, DateTimeOffset? CreatedAt, int Version, string? PromptFileName = null);
 public sealed record SubmissionFileResponse(Guid FileId, string FileName, string ContentType, long SizeBytes);
 // StudentName/StudentCode: chỉ có ở màn hình của giáo viên/nhân viên (danh sách bài nộp, kết quả chấm); null nếu Identity
 // không trả tên (tài khoản bị khóa/không còn là học viên) — frontend hiển thị ID thay thế.
 public sealed record SubmissionResponse(Guid Id, Guid AssignmentId, Guid StudentId, Guid Revision, DateTimeOffset SubmittedAt,
     IReadOnlyList<SubmissionFileResponse> Files, decimal? Score = null, string? Feedback = null, int GradeVersion = 0,
-    DateTimeOffset? GradedAt = null, Guid? GradedBy = null, string? StudentName = null, string? StudentCode = null);
+    DateTimeOffset? GradedAt = null, Guid? GradedBy = null, string? StudentName = null, string? StudentCode = null, string? AnswerText = null);
 public sealed record GradeHistoryResponse(int Version, decimal Score, decimal? PreviousScore, string? Feedback, Guid GradedBy,
     string? GradedByName, DateTimeOffset GradedAt);
 // Trạng thái của học viên với một bài: NotSubmitted | Submitted | Graded | Missed | Exempted.
 public sealed record StudentAssignmentResponse(AssignmentResponse Assignment, string SubmissionStatus, bool IsObligated,
-    Guid? SubmissionId, DateTimeOffset? SubmittedAt, decimal? Score, string? Feedback, DateTimeOffset? GradedAt);
+    Guid? SubmissionId, DateTimeOffset? SubmittedAt, decimal? Score, string? Feedback, DateTimeOffset? GradedAt, bool IsTransferredHistory = false);
 public sealed record RecipientResponse(Guid StudentId, DateTimeOffset AssignedAt, string Outcome, string SubmissionStatus,
     Guid? SubmissionId, DateTimeOffset? SubmittedAt, decimal? Score, int GradeVersion, string? StudentName = null,
     string? StudentCode = null);
@@ -66,6 +67,7 @@ public interface IAssignmentStore
     // Ứng viên roster từ read model class_students (đồng bộ từ StudentEnrolled); người gọi phải lọc quyền hiện tại.
     Task<IReadOnlyList<Guid>> RosterCandidatesAsync(Guid classId, CancellationToken ct);
     Task<IReadOnlyList<Guid>> StudentClassCandidatesAsync(Guid studentId, CancellationToken ct);
+    Task<IReadOnlyList<Assignment>> TransferredSubmissionAssignmentsAsync(Guid studentId, IReadOnlyCollection<Guid> classIds, CancellationToken ct);
     // Outbox tối giản: các bản ghi đã commit nhưng chưa phát event thành công.
     Task<IReadOnlyList<Assignment>> UnsentPublishedAsync(int max, CancellationToken ct);
     Task<IReadOnlyList<SubmissionGrade>> UnsentGradesAsync(int max, CancellationToken ct);

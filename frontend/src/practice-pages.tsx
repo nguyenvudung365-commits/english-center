@@ -60,19 +60,25 @@ function PracticeList({ manager }: { manager: boolean }) {
     const create = useAction();
     const data = result.data;
     return <>
-        <PageHeading title="Luyện tập" subtitle="Bài luyện tập dạng văn bản theo lớp. Học viên chỉ đọc; giáo viên đúng lớp và giáo vụ quản lý nội dung." />
+        <PageHeading title="Luyện tập" subtitle="Ôn nội dung theo lớp hoặc mở bài có thể làm và nộp trực tiếp." />
+        <section className="practice-brand panel">
+            <div><h2>Làm bài trực tuyến</h2><p>Mở bài tập đang nhận bài để đọc hoặc tải đề PDF, nhập câu trả lời và nộp cho giáo viên.</p>
+                <Link className="primary inline" to={classId ? `/assignments?classId=${encodeURIComponent(classId)}` : "/assignments"}>Mở bài tập{classId ? " của lớp" : ""}</Link>
+            </div>
+            <img src="/study-desk.svg" width="300" height="190" alt="" />
+        </section>
         <section className="panel">
-            <form className="academic-filters" onSubmit={event => { event.preventDefault(); setQuery(previous => ({ ...previous, search: input.trim(), page: 1 })); }}>
+            <form className="academic-filters coursework-filters" onSubmit={event => { event.preventDefault(); if (classId) setQuery(previous => ({ ...previous, search: input.trim(), page: 1 })); }}>
                 <ClassSelect id="practice-class" value={classId} onChange={value => {
                     const next = new URLSearchParams(params);
                     if (value) next.set("classId", value); else next.delete("classId");
                     setParams(next); setQuery(previous => ({ ...previous, page: 1 })); setNotice("");
                 }} />
-                <div className="academic-field">
+                {classId && <><div className="academic-field">
                     <label htmlFor="practice-search">Tìm theo tên hoặc nội dung</label>
                     <input id="practice-search" type="search" maxLength={100} value={input} onChange={event => setInput(event.target.value)} />
                 </div>
-                <button className="primary">Tìm bài luyện tập</button>
+                <button className="primary">Tìm bài luyện tập</button></>}
             </form>
             {!classId && <p>Chọn một lớp để xem bài luyện tập.</p>}
             {classId && <ReadFeedback result={result} />}

@@ -12,13 +12,13 @@ namespace EnglishCenter.Modules.Identity.Infrastructure.Authentication;
 
 internal sealed class TokenService(IOptions<JwtOptions> options) : ITokenService
 {
-    public TokenResponse Issue(User user, DateTimeOffset now)
+    public TokenResponse Issue(User user, Guid sessionId, DateTimeOffset now)
     {
         var settings = options.Value;
         var expires = now.AddMinutes(settings.AccessTokenMinutes);
         var jwt = new JwtSecurityToken(settings.Issuer, settings.Audience,
             [new Claim(AuthClaims.Subject, user.Id.ToString()), new Claim(AuthClaims.Role, user.Role),
-             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())],
+             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()), new Claim(JwtRegisteredClaimNames.Sid, sessionId.ToString())],
             now.UtcDateTime, expires.UtcDateTime,
             new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(settings.SigningKey)), SecurityAlgorithms.HmacSha256));
         return new TokenResponse(new JwtSecurityTokenHandler().WriteToken(jwt), expires,

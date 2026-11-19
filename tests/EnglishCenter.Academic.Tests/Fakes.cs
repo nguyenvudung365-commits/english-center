@@ -118,6 +118,7 @@ internal sealed class FakeClassPolicy : ICurrentUser, IAccountAccess, IEnrollmen
         ct.ThrowIfCancellationRequested();
         return Task.FromResult(Enrollments.Contains((classId, studentId)));
     }
+    public Task<IReadOnlyList<Guid>> TransferredClassIdsAsync(Guid studentId, CancellationToken ct) => Task.FromResult<IReadOnlyList<Guid>>([]);
     public Task<ClassIdentity?> FindClassAsync(Guid classId, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();

@@ -57,6 +57,9 @@ public sealed class CourseworkAccess(IAcademicStore classes, IEnrollmentAccess e
     public Task<bool> StudentHasAccessAsync(Guid classId, Guid studentId, CancellationToken ct) =>
         enrollment.IsActiveAsync(classId, studentId, ct);
 
+    internal Task<IReadOnlyList<Guid>> TransferredClassIdsAsync(Guid studentId, CancellationToken ct) =>
+        enrollment.TransferredClassIdsAsync(studentId, ct);
+
     public static PageResponse<T> Page<T>(IReadOnlyList<T> all, int page, int pageSize)
     {
         if (page is < 1 or > 1_000_000 || pageSize < 1)
