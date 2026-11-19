@@ -4,7 +4,7 @@ import { api, ApiError, getSession, identity } from "./api";
 import { useRead } from "./academic-pages";
 import { PageHeading } from "./ui";
 import {
-    canCreateAccounts, createAccount, getProfile, updateProfile, uploadAvatar, validateAvatar,
+    canCreateAccounts, createAccount, getProfile, normalizeVietnamMobile, provisionStaff, updateProfile, uploadAvatar, validateAvatar, vietnamMobileHint,
     type CreatedAccount, type Profile,
 } from "./identity";
 
@@ -17,6 +17,7 @@ export function TeacherAdministration() {
     const result = useRead(loadTeachers);
     const [query, setQuery] = useState("");
     const [selected, setSelected] = useState<ManagedTeacher | null>(null);
+    const [originalPhone, setOriginalPhone] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<unknown>();
     const [notice, setNotice] = useState("");
@@ -28,9 +29,9 @@ export function TeacherAdministration() {
         setBusy(true); setError(null); setNotice("");
         try {
             const value = await api<ManagedTeacher>(`${teachersPath}/${id}${lock ? "/lock" : ""}`, {
-                method: "PUT", body: JSON.stringify(lock ? { expectedRevision, isLocked: !isLocked } : { expectedRevision, fullName, email, phone }),
+                method: "PUT", body: JSON.stringify(lock ? { expectedRevision, isLocked: !isLocked } : { expectedRevision, fullName, email, phone: normalizeVietnamMobile(phone, originalPhone) }),
             });
-            setSelected(value); result.retry();
+            setSelected(value); setOriginalPhone(value.phone); result.retry();
             setNotice(lock ? (value.isLocked ? "Đã khóa tài khoản." : "Đã mở khóa tài khoản.") : "Đã lưu hồ sơ giáo viên.");
         } catch (err) { setError(err); }
         finally { setBusy(false); }
@@ -48,7 +49,7 @@ export function TeacherAdministration() {
             {visible?.length === 0 && <p role="status">Không có giáo viên phù hợp.</p>}
             {visible?.length ? <ul className="catalog-list">{visible.map(x => <li key={x.id}>
                 <h2>{x.fullName}</h2><p>{x.email} · {x.isLocked ? "Đã khóa" : "Hoạt động"}</p>
-                <button className="secondary" disabled={busy} onClick={() => { setSelected(x); setError(null); setNotice(""); }}>
+                <button className="secondary" disabled={busy} onClick={() => { setSelected(x); setOriginalPhone(x.phone); setError(null); setNotice(""); }}>
                     Quản lý<span className="sr-only"> {x.fullName}</span>
                 </button>
             </li>)}</ul> : null}
@@ -60,8 +61,7 @@ export function TeacherAdministration() {
                 <input id="managed-teacher-fullName" required maxLength={200} value={selected.fullName} onChange={e => setSelected({ ...selected, fullName: e.target.value })} />
                 <label htmlFor="managed-teacher-email">Email</label>
                 <input id="managed-teacher-email" required type="email" maxLength={254} value={selected.email} onChange={e => setSelected({ ...selected, email: e.target.value })} />
-                <label htmlFor="managed-teacher-phone">Số điện thoại</label>
-                <input id="managed-teacher-phone" type="tel" maxLength={32} value={selected.phone ?? ""} onChange={e => setSelected({ ...selected, phone: e.target.value })} />
+                <VietnamMobileField prefix="managed-teacher" error={error} value={selected.phone ?? ""} change={phone => setSelected({ ...selected, phone })} />
                 <button className="primary" type="submit">Lưu hồ sơ</button>{" "}
                 <button className="secondary" type="button" onClick={() => void save(true)}>{selected.isLocked ? "Mở khóa" : "Khóa tài khoản"}</button>{" "}
                 <button className="secondary" type="button" onClick={() => { setSelected(null); result.retry(); }}>Đóng và tải lại danh sách</button>
@@ -81,12 +81,12 @@ function fieldErrors(error: unknown, field: string) {
     return Object.entries(error.errors).filter(([key]) => key.toLowerCase() === field.toLowerCase()).flatMap(([, messages]) => messages);
 }
 
-function InlineError({ error, field, prefix }: { error: unknown; field: string; prefix: string }) {
+export function InlineError({ error, field, prefix }: { error: unknown; field: string; prefix: string }) {
     const messages = fieldErrors(error, field);
     return messages.length ? <span className="field-error" id={`${prefix}-${field}-error`}>{messages.join(" ")}</span> : null;
 }
 
-function FormError({ error, prefix }: { error: unknown; prefix: string }) {
+export function FormError({ error, prefix }: { error: unknown; prefix: string }) {
     const summary = useRef<HTMLDivElement>(null);
     useEffect(() => { if (error) summary.current?.focus(); }, [error]);
     if (!error) return null;
@@ -101,11 +101,24 @@ function FormError({ error, prefix }: { error: unknown; prefix: string }) {
     </div>;
 }
 
-function errorAttributes(error: unknown, field: string, prefix: string) {
+export function errorAttributes(error: unknown, field: string, prefix: string) {
     return {
         "aria-invalid": fieldErrors(error, field).length > 0 || undefined,
         "aria-describedby": fieldErrors(error, field).length ? `${prefix}-${field}-error` : undefined,
     };
+}
+
+export function VietnamMobileField({ prefix, error, value, change, autoComplete = "off" }: {
+    prefix: string; error: unknown; value: string; change: (value: string) => void; autoComplete?: string;
+}) {
+    const attrs = errorAttributes(error, "phone", prefix);
+    const id = `${prefix}-phone`;
+    return <label htmlFor={id}>Số di động <span className="optional">(không bắt buộc)</span>
+        <input id={id} type="tel" autoComplete={autoComplete} maxLength={32} value={value} onChange={event => change(event.target.value)}
+            {...attrs} aria-describedby={[`${id}-help`, attrs["aria-describedby"]].filter(Boolean).join(" ")} />
+        <small id={`${id}-help`}>{vietnamMobileHint}</small>
+        <InlineError error={error} field="phone" prefix={prefix} />
+    </label>;
 }
 
 export function ProfilePanel() {
@@ -161,10 +174,11 @@ export function ProfilePanel() {
         const controller = new AbortController();
         operation.current = controller;
         try {
+            const mobile = normalizeVietnamMobile(phone, profile.phone);
             const uploadedId = file ? await uploadAvatar(file, setProgress, controller.signal) : avatarId;
             setProgress("Đang lưu hồ sơ…");
             const saved = await updateProfile({
-                fullName: name.trim(), email: email.trim(), phone: phone.trim() || null,
+                fullName: name.trim(), email: email.trim(), phone: mobile,
                 avatarFileId: uploadedId, expectedRevision: profile.revision,
             }, controller.signal);
             if (!controller.signal.aborted) { apply(saved); setNotice("Đã lưu hồ sơ cá nhân."); }
@@ -241,10 +255,7 @@ export function ProfilePanel() {
                     <input id="profile-email" type="email" autoComplete="email" required maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} {...errorAttributes(error, "email", prefix)} />
                     <InlineError error={error} field="email" prefix={prefix} />
                 </label>
-                <label htmlFor="profile-phone">Số điện thoại <span className="optional">(không bắt buộc)</span>
-                    <input id="profile-phone" type="tel" autoComplete="tel" maxLength={32} value={phone} onChange={(event) => setPhone(event.target.value)} {...errorAttributes(error, "phone", prefix)} />
-                    <InlineError error={error} field="phone" prefix={prefix} />
-                </label>
+                <VietnamMobileField prefix={prefix} error={error} value={phone} change={setPhone} autoComplete="tel" />
                 <div className="identity-actions"><button className="primary" disabled={!dirty}><Check size={18} aria-hidden="true" /> Lưu thay đổi</button>
                     <button className="secondary" type="button" disabled={!dirty} onClick={() => { apply(profile); setError(null); setNotice(""); }}>Hủy thay đổi</button></div>
                 {error instanceof ApiError && (error.status === 409 || error.status === 503) && <button className="text-button" type="button" onClick={() => {
@@ -256,7 +267,7 @@ export function ProfilePanel() {
     </section>;
 }
 
-export function AccountCreate() {
+export function AccountCreate({ staffOnly = false, onCreated }: { staffOnly?: boolean; onCreated?: () => void } = {}) {
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
     const [phone, setPhone] = useState("");
@@ -272,7 +283,7 @@ export function AccountCreate() {
     useEffect(() => () => operation.current?.abort(), []);
     const user = identity(getSession());
     const prefix = "create";
-    if (!user || !canCreateAccounts(user.role)) return <section className="panel"><h1>Không có quyền truy cập</h1><p>Chỉ Giáo vụ hoặc Quản trị viên được tạo tài khoản.</p></section>;
+    if (!user || (staffOnly ? user.role !== "Admin" : !canCreateAccounts(user.role))) return <section className="panel"><h1>Không có quyền truy cập</h1><p>{staffOnly ? "Chỉ Quản trị viên được tạo tài khoản giáo vụ." : "Chỉ Giáo vụ hoặc Quản trị viên được tạo tài khoản."}</p></section>;
 
     async function submit(event: FormEvent) {
         event.preventDefault();
@@ -283,28 +294,27 @@ export function AccountCreate() {
         const controller = new AbortController();
         operation.current = controller;
         try {
-            const result = await createAccount({ fullName: name.trim(), email: email.trim(), phone: phone.trim() || null, password, role }, controller.signal);
+            const request = { fullName: name.trim(), email: email.trim(), phone: normalizeVietnamMobile(phone), password };
+            const result = staffOnly ? await provisionStaff(request, controller.signal) : await createAccount({ ...request, role }, controller.signal);
             if (!controller.signal.aborted) {
                 setCreated(result); setName(""); setEmail(""); setPhone(""); setPassword(""); setConfirm(""); setShow(false);
+                onCreated?.();
             }
         } catch (reason) { if (!controller.signal.aborted) setError(reason); }
         finally { if (!controller.signal.aborted) setBusy(false); }
     }
 
-    return <>
-        <PageHeading title="Tạo tài khoản" subtitle="Cấp quyền truy cập cho học viên và giáo viên của trung tâm." />
-        <div className="identity-create-grid">
-            <section className="panel identity-panel">
-                <div className="identity-section-heading"><h2>Thông tin tài khoản mới</h2><UserPlus size={24} className="accent" aria-hidden="true" /></div>
+    const form = <section className="panel identity-panel">
+                <div className="identity-section-heading"><h2>{staffOnly ? "Tạo tài khoản giáo vụ" : "Thông tin tài khoản mới"}</h2><UserPlus size={24} className="accent" aria-hidden="true" /></div>
                 {created && <div className="notice identity-created" role="status"><strong>Đã tạo tài khoản {roleLabels[created.role].toLowerCase()}.</strong><p>{created.fullName} · {created.email}</p>{created.studentCode && <p>Mã học viên: <strong>{created.studentCode}</strong></p>}<p>Bạn vẫn đang sử dụng tài khoản quản trị hiện tại.</p><button type="button" className="secondary" onClick={() => { setCreated(null); nameInput.current?.focus(); }}>Tạo tài khoản tiếp theo</button></div>}
                 <form onSubmit={submit} aria-busy={busy}>
                     <FormError error={error} prefix={prefix} />
                     <fieldset disabled={busy}>
                         <legend className="sr-only">Thông tin tài khoản mới</legend>
-                        <label htmlFor="create-role">Vai trò
+                        {!staffOnly && <label htmlFor="create-role">Vai trò
                             <select id="create-role" value={role} onChange={(event) => setRole(event.target.value as "Student" | "Teacher")} {...errorAttributes(error, "role", prefix)}><option value="Student">Học viên</option><option value="Teacher">Giáo viên</option></select>
                             <InlineError error={error} field="role" prefix={prefix} />
-                        </label>
+                        </label>}
                         <label htmlFor="create-fullName">Họ và tên
                             <input ref={nameInput} id="create-fullName" required maxLength={200} autoComplete="off" value={name} onChange={(event) => setName(event.target.value)} {...errorAttributes(error, "fullName", prefix)} />
                             <InlineError error={error} field="fullName" prefix={prefix} />
@@ -313,10 +323,7 @@ export function AccountCreate() {
                             <input id="create-email" type="email" required maxLength={254} autoComplete="off" value={email} onChange={(event) => setEmail(event.target.value)} {...errorAttributes(error, "email", prefix)} />
                             <InlineError error={error} field="email" prefix={prefix} />
                         </label>
-                        <label htmlFor="create-phone">Số điện thoại <span className="optional">(không bắt buộc)</span>
-                            <input id="create-phone" type="tel" maxLength={32} autoComplete="off" value={phone} onChange={(event) => setPhone(event.target.value)} {...errorAttributes(error, "phone", prefix)} />
-                            <InlineError error={error} field="phone" prefix={prefix} />
-                        </label>
+                        <VietnamMobileField prefix={prefix} error={error} value={phone} change={setPhone} />
                         <label htmlFor="create-password">Mật khẩu tạm thời
                             <span className="password-input"><input id="create-password" type={show ? "text" : "password"} autoComplete="new-password" required minLength={8} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} {...errorAttributes(error, "password", prefix)} />
                                 <button type="button" aria-label={show ? "Ẩn mật khẩu tạm thời" : "Hiện mật khẩu tạm thời"} aria-pressed={show} onClick={() => setShow((value) => !value)}>{show ? <EyeOff size={18} /> : <Eye size={18} />}</button></span>
@@ -330,7 +337,12 @@ export function AccountCreate() {
                         <button className="primary"><UserPlus size={18} aria-hidden="true" />{busy ? "Đang tạo tài khoản…" : "Tạo tài khoản"}</button>
                     </fieldset>
                 </form>
-            </section>
+            </section>;
+    if (staffOnly) return form;
+    return <>
+        <PageHeading title="Tạo tài khoản" subtitle="Cấp quyền truy cập cho học viên và giáo viên của trung tâm." />
+        <div className="identity-create-grid">
+            {form}
             <aside className="panel identity-guide" aria-labelledby="account-guide"><ShieldCheck size={30} className="accent" aria-hidden="true" /><h2 id="account-guide">Tài khoản do trung tâm cấp</h2><p>Không mở đăng ký công khai. Giáo vụ hoặc Quản trị viên xác nhận thông tin và cấp tài khoản cho người dùng.</p><ol><li>Chọn đúng vai trò và email đăng nhập.</li><li>Cấp email và mật khẩu tạm thời qua kênh riêng.</li><li>Hướng dẫn người nhận đăng nhập và đổi mật khẩu tại <strong>Tài khoản</strong>.</li></ol><p className="muted small">Tạo tài khoản không tự ghi danh vào lớp. Không thể cấp vai trò Admin hoặc Giáo vụ tại đây.</p></aside>
         </div>
     </>;

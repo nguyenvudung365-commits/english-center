@@ -114,6 +114,7 @@ public sealed class AuthController(IdentityService identity, IHostEnvironment en
 [Route("api/identity/users")]
 [Authorize(Roles = Roles.AccountManagers)]
 [IdentityErrors]
+[ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class UsersController(IdentityService identity, UserSyncService sync) : ControllerBase
 {
     [HttpPost]
@@ -128,7 +129,6 @@ public sealed class UsersController(IdentityService identity, UserSyncService sy
         sync.RepublishAsync(request, ct);
 
     [Authorize(Roles = Roles.Admin), HttpGet("teachers")]
-    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public Task<IReadOnlyList<ManagedTeacher>> Teachers(CancellationToken ct) => identity.TeachersAsync(ct);
 
     [Authorize(Roles = Roles.Admin), HttpPut("teachers/{id:guid}")]
@@ -138,6 +138,33 @@ public sealed class UsersController(IdentityService identity, UserSyncService sy
     [Authorize(Roles = Roles.Admin), HttpPut("teachers/{id:guid}/lock")]
     public Task<ManagedTeacher> SetTeacherLock(Guid id, TeacherLockRequest request, CancellationToken ct) =>
         identity.SetTeacherLockAsync(id, request, ct);
+
+    [HttpGet("students")]
+    public Task<ManagedAccountPage> Students(CancellationToken ct, [FromQuery] string? q = null,
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 20) => identity.ListStudentsAsync(q, page, pageSize, ct);
+
+    [HttpGet("students/{id:guid}")]
+    public Task<ManagedAccount> Student(Guid id, CancellationToken ct) => identity.GetStudentAsync(id, ct);
+
+    [HttpPut("students/{id:guid}")]
+    public Task<ManagedAccount> UpdateStudentContact(Guid id, UpdateStudentContactRequest request, CancellationToken ct) =>
+        identity.UpdateStudentContactAsync(id, request, ct);
+
+    [Authorize(Roles = Roles.Admin), HttpPut("students/{id:guid}/lock")]
+    public Task<ManagedAccount> SetStudentLock(Guid id, AccountLockRequest request, CancellationToken ct) =>
+        identity.SetStudentLockAsync(id, request, ct);
+
+    [Authorize(Roles = Roles.Admin), HttpGet("staff")]
+    public Task<ManagedAccountPage> Staff(CancellationToken ct, [FromQuery] string? q = null,
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 20) => identity.ListStaffAsync(q, page, pageSize, ct);
+
+    [Authorize(Roles = Roles.Admin), HttpPost("staff")]
+    public async Task<IActionResult> ProvisionStaff(ProvisionStaffRequest request, CancellationToken ct) =>
+        StatusCode(201, await identity.ProvisionStaffAsync(request, ct));
+
+    [Authorize(Roles = Roles.Admin), HttpPut("staff/{id:guid}/lock")]
+    public Task<ManagedAccount> SetStaffLock(Guid id, AccountLockRequest request, CancellationToken ct) =>
+        identity.SetStaffLockAsync(id, request, ct);
 }
 
 public sealed class IdentityErrorsAttribute : ExceptionFilterAttribute

@@ -94,11 +94,15 @@ describe("cookie-mode session restore and opt-in", () => {
         expect(mod.getSession()).not.toBeNull();
     });
 
-    it("reports 'unavailable' on 429 without hammering the endpoint", async () => {
-        fetcher.mockResolvedValue(json({}, 429));
+    it("reports rate limiting without automatically retrying and recovers on manual retry", async () => {
+        fetcher.mockResolvedValueOnce(json({}, 429)).mockResolvedValueOnce(json(session()));
         await mod.restoreSession();
         expect(fetcher).toHaveBeenCalledTimes(1);
-        expect(mod.getAuthState()).toBe("unavailable");
+        expect(mod.getAuthState()).toBe("rate-limited");
+        await mod.restoreSession();
+        expect(fetcher).toHaveBeenCalledTimes(2);
+        expect(mod.getAuthState()).toBe("ready");
+        expect(mod.getSession()).not.toBeNull();
     });
 
     it("shares one request between concurrent restore calls", async () => {

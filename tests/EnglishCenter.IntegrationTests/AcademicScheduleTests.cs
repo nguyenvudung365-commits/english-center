@@ -206,9 +206,10 @@ public sealed class AcademicScheduleTests : IAsyncLifetime
     {
         await fixture.AsAsync(actor);
         await fixture.ChangeAccountAsync(actor, change);
+        var expected = change == "delete" ? HttpStatusCode.Unauthorized : HttpStatusCode.Forbidden;
         foreach (var path in new[] { ClassesUrl, $"{ClassesUrl}/{fixture.Second}", $"{ClassesUrl}/{Guid.NewGuid()}" })
-            Assert.Equal(HttpStatusCode.Forbidden, (await Client.GetAsync(path)).StatusCode);
-        if (actor == "student") Assert.Equal(HttpStatusCode.Forbidden, (await Client.GetAsync(ClassesUrl + "/mine")).StatusCode);
+            Assert.Equal(expected, (await Client.GetAsync(path)).StatusCode);
+        if (actor == "student") Assert.Equal(expected, (await Client.GetAsync(ClassesUrl + "/mine")).StatusCode);
     }
 
     [Theory]
@@ -232,7 +233,7 @@ public sealed class AcademicScheduleTests : IAsyncLifetime
             _ => await Client.PostAsJsonAsync(ClassesUrl, new { code = "UNAUTHORIZED", name = "Synthetic", courseId = (await db.Courses.SingleAsync(x => x.Code == "SCHEDULE")).Id,
                 teacherId = fixture.Users["teacher"], classType = "Main", startDate = "2026-12-31", endDate = "2027-01-02", maxStudents = 20, tuitionFee = 0 })
         };
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(change == "delete" ? HttpStatusCode.Unauthorized : HttpStatusCode.Forbidden, response.StatusCode);
         Assert.Equal(original, await db.Classes.CountAsync());
     }
 
@@ -515,9 +516,10 @@ public sealed class AcademicScheduleTests : IAsyncLifetime
         await fixture.AsAsync(actor);
         var token = Client.DefaultRequestHeaders.Authorization;
         await fixture.ChangeAccountAsync(actor, change);
+        var expected = change == "delete" ? HttpStatusCode.Unauthorized : HttpStatusCode.Forbidden;
         foreach (var path in new[] { Range(), $"{SessionsUrl}/{session.GetProperty("id").GetGuid()}", $"{SessionsUrl}/{Guid.NewGuid()}" })
-            Assert.Equal(HttpStatusCode.Forbidden, (await Client.GetAsync(path)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await Client.PostAsJsonAsync(SessionsUrl, fixture.Body())).StatusCode);
+            Assert.Equal(expected, (await Client.GetAsync(path)).StatusCode);
+        Assert.Equal(expected, (await Client.PostAsJsonAsync(SessionsUrl, fixture.Body())).StatusCode);
         Assert.Equal(token, Client.DefaultRequestHeaders.Authorization);
     }
 

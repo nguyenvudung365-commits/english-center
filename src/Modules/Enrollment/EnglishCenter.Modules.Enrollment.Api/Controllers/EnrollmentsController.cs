@@ -22,6 +22,13 @@ public sealed class EnrollmentsController(EnrollmentService service) : Controlle
     [HttpGet("{id:guid}"), Authorize(Roles = Managers + "," + Roles.Student)]
     public Task<EnrollmentResponse> Get(Guid id, CancellationToken ct) => service.GetAsync(id, ct);
 
+    [HttpPost("{id:guid}/transfer"), Authorize(Roles = Managers)]
+    public async Task<IActionResult> Transfer(Guid id, TransferEnrollmentRequest request, CancellationToken ct)
+    {
+        var value = await service.TransferAsync(id, request, ct);
+        return CreatedAtAction(nameof(Get), new { id = value.Id }, value);
+    }
+
     [HttpGet("mine"), Authorize(Roles = Roles.Student)]
     public Task<PageResult<MyEnrollmentResponse>> Mine(CancellationToken ct, [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20) => service.ListMineAsync(page, pageSize, ct);

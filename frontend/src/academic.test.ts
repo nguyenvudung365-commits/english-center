@@ -256,12 +256,12 @@ describe("Academic API contract through the real session client", () => {
         expect(fetcher).not.toHaveBeenCalled();
     });
 
-    it("preserves server 400 title and PascalCase field errors without resubmitting", async () => {
+    it("localizes the server title and errors without changing field keys or resubmitting", async () => {
         const errors = { Code: ["Invalid code."], TeacherId: ["Teacher not found."] };
         fetcher.mockResolvedValue(json({ title: "Academic validation failed.", errors }, 400));
         const operation = createClass(draft());
         await expect(operation).rejects.toBeInstanceOf(ApiError);
-        await expect(operation).rejects.toMatchObject({ status: 400, message: "Academic validation failed.", errors });
+        await expect(operation).rejects.toMatchObject({ status: 400, message: "Dữ liệu chưa hợp lệ. Vui lòng kiểm tra lại.", errors: { Code: ["Mã không hợp lệ."], TeacherId: ["Không tìm thấy giáo viên."] } });
         expect(fetcher).toHaveBeenCalledTimes(1);
     });
 
@@ -271,7 +271,7 @@ describe("Academic API contract through the real session client", () => {
         const errors = { Code: ["Class code already exists."] };
         fetcher.mockResolvedValue(json({ title: "Academic data already exists.", errors }, 409));
         await expect(createClass(input)).rejects.toMatchObject({
-            status: 409, message: "Academic data already exists.", errors,
+            status: 409, message: "Dữ liệu đã tồn tại.", errors: { Code: ["Mã lớp đã được sử dụng."] },
         });
         expect(input).toEqual(original);
         expect(fetcher).toHaveBeenCalledTimes(1);
@@ -288,7 +288,7 @@ describe("Academic API contract through the real session client", () => {
 
     it("preserves a class-detail 404 without inventing a record", async () => {
         fetcher.mockResolvedValue(json({ title: "Class not found." }, 404));
-        await expect(getClass(classId)).rejects.toMatchObject({ status: 404, message: "Class not found." });
+        await expect(getClass(classId)).rejects.toMatchObject({ status: 404, message: "Không tìm thấy lớp học." });
         expect(fetcher).toHaveBeenCalledTimes(1);
     });
 
@@ -382,7 +382,7 @@ describe("Academic class paging contract", () => {
 
     it.each([400, 403])("preserves list errors (%s), never disguising them as an empty page", async (status) => {
         fetcher.mockResolvedValue(json({ title: "Invalid page", errors: { Page: ["Invalid page."] } }, status));
-        await expect(listClasses({ page: 2 })).rejects.toMatchObject({ status, errors: { Page: ["Invalid page."] } });
+        await expect(listClasses({ page: 2 })).rejects.toMatchObject({ status, errors: { Page: ["Số trang không hợp lệ."] } });
         expect(fetcher).toHaveBeenCalledTimes(1);
     });
 });

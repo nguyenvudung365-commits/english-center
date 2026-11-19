@@ -12,6 +12,7 @@ public sealed class StudentEnrolledIntegrationEventHandler(IInvoiceStore store, 
     public async Task HandleAsync(StudentEnrolledIntegrationEvent integrationEvent, CancellationToken cancellationToken = default)
     {
         var e = integrationEvent;
+        if (e.SkipInvoice) return;
         var candidate = Invoice.Create(e.EnrollmentId, e.StudentId, e.ClassId, e.TuitionFee,
             e.EnrolledAtUtc, clock.GetUtcNow().UtcDateTime);
         var invoice = await store.CreateOnceAsync(candidate, cancellationToken);

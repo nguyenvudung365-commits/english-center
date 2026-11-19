@@ -4,7 +4,9 @@ namespace EnglishCenter.Modules.Academic.Domain.Assignments;
 public enum AssignmentKind
 {
     InClass,
-    Homework
+    Homework,
+    // Bài thi dạng file: giáo viên đính kèm đề PDF, học viên chỉ tải đề khi bài đang mở rồi nộp file như bài tập thường.
+    Exam
 }
 
 // Trạng thái hiển thị; Draft chỉ người quản lý lớp thấy.
@@ -42,6 +44,13 @@ public sealed class Assignment
     public DateTimeOffset? UpdatedAt { get; private set; }
     public DateTimeOffset? PublishedAt { get; private set; }
     public Guid? PublishedBy { get; private set; }
+    // Metadata của đề PDF; PromptOwnerId là người tải lên.
+    // Logic reference tới Media, không có FK chéo schema.
+    public Guid? PromptFileId { get; private set; }
+    public Guid? PromptOwnerId { get; private set; }
+    public string? PromptFileName { get; private set; }
+    public string? PromptContentType { get; private set; }
+    public long? PromptSizeBytes { get; private set; }
     // Outbox tối giản: null nghĩa là AssignmentPublished chưa được phát thành công sau commit.
     public DateTimeOffset? PublishedEventSentAt { get; private set; }
     // Thời điểm worker đã chốt nghĩa vụ (Submitted/Missed/Exempted) sau hạn nộp.
@@ -82,9 +91,21 @@ public sealed class Assignment
         Touch(now);
     }
 
+    /// <summary>Gắn hoặc thay đề PDF khi còn là bản nháp.</summary>
+    public void AttachPrompt(Guid fileId, Guid ownerId, string fileName, string contentType, long sizeBytes)
+    {
+        if (IsVisibleToStudents) throw new InvalidOperationException("Published assignments cannot change their prompt.");
+        if (fileId == Guid.Empty || ownerId == Guid.Empty || string.IsNullOrWhiteSpace(fileName) || fileName.Length > 255 ||
+            string.IsNullOrWhiteSpace(contentType) || contentType.Length > 128 || sizeBytes is <= 0 or > 20 * 1024 * 1024)
+            throw new ArgumentException("Invalid prompt file.");
+        PromptFileId = fileId; PromptOwnerId = ownerId; PromptFileName = fileName;
+        PromptContentType = contentType; PromptSizeBytes = sizeBytes;
+    }
+
     public void Publish(Guid publishedBy, DateTimeOffset now)
     {
         if (IsLegacy || IsPublished) throw new InvalidOperationException("Assignment is already visible to students.");
+        if (Kind == AssignmentKind.Exam && PromptFileId is null) throw new InvalidOperationException("An exam needs a prompt file before publishing.");
         if (publishedBy == Guid.Empty) throw new ArgumentException("Publisher is required.", nameof(publishedBy));
         PublishedAt = now.ToUniversalTime(); PublishedBy = publishedBy;
         Touch(now);
@@ -114,6 +135,11 @@ public sealed class Assignment
             throw new ArgumentException("Invalid assignment.");
         Title = title.Trim(); Description = description.Trim();
         OpensAtUtc = opens.ToUniversalTime(); ClosesAtUtc = closes.ToUniversalTime();
+        // Bài thi và bài tập dùng hai loại file xác nhận khác nhau.
+        if ((Kind == AssignmentKind.Exam) != (kind == AssignmentKind.Exam))
+        {
+            PromptFileId = null; PromptOwnerId = null; PromptFileName = null; PromptContentType = null; PromptSizeBytes = null;
+        }
         Kind = kind; Unit = Clean(unit); Lesson = Clean(lesson); SessionId = sessionId;
     }
 

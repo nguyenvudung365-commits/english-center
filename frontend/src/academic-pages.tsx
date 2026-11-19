@@ -43,18 +43,13 @@ export function ManagerOnly({ children }: { children: ReactNode }) {
 function ClassLinks() {
     const user = identity(getSession());
     const manager = user && canManageAcademic(user.role);
-    return (
-        <nav className="academic-actions" aria-label="Điều hướng lớp học">
-            <NavLink end className={({ isActive }) => isActive ? "primary inline" : "secondary inline"} to="/classes">
-                Tra cứu lớp
-            </NavLink>
-            {manager && (
+    return manager ? (
+        <div className="academic-actions">
                 <NavLink end className={({ isActive }) => isActive ? "primary inline" : "secondary inline"} to="/classes/new">
                     Tạo lớp học
                 </NavLink>
-            )}
-        </nav>
-    );
+        </div>
+    ) : null;
 }
 // Cleanup ignores obsolete reads; the generation check also covers logout while JSON is parsing.
 export function useRead<T>(load: () => Promise<T>) {
@@ -244,6 +239,7 @@ export function ClassDetails({ feed }: { feed?: (classId: string) => ReactNode }
                     </dl>
                     <div className="academic-actions">
                         <Link className="secondary inline" to={`/schedule?classId=${encodeURIComponent(item.id)}`}>Xem lịch lớp</Link>
+                        <Link className="secondary inline" to={`/materials?classId=${encodeURIComponent(item.id)}`}>Tài liệu lớp</Link>
                         <Link className="secondary inline" to={`/progress/${item.id}`}>Tiến độ lớp</Link>
                         {identity(getSession()) && canManageAcademic(identity(getSession())!.role) && <Link className="primary inline" to={`/schedule?classId=${encodeURIComponent(item.id)}&create=1`}>Tạo buổi học</Link>}
                     </div>

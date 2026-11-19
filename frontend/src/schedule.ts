@@ -174,6 +174,82 @@ export async function saveSession(draft: SessionDraft, existing?: ScheduledSessi
 
 export const createSession = (draft: SessionDraft) => saveSession(draft);
 
+export type BatchDraft = Omit<SessionDraft, "startsAtLocal" | "endsAtLocal"> & { dates: string[]; startTime: string; endTime: string };
+export type BatchPreviewItem = {
+    index: number;
+    startsAtUtc: string | null;
+    endsAtUtc: string | null;
+    status: "Ok" | "Invalid" | "BatchOverlap" | "TeacherOverlap";
+    message: string | null;
+};
+export type BatchPreview = { canCreate: boolean; items: BatchPreviewItem[] };
+export const maxBatchDates = 62; // keep in sync with SessionBatchService.MaxSlots
+
+export function recurringBatchDates(dates: string[], from: string, to: string, weekdays: number[]): string[] {
+    const start = dateMilliseconds(from);
+    const end = dateMilliseconds(to);
+    if (end < start) throw new Error("Ngày kết thúc phải từ ngày bắt đầu trở đi.");
+    if (!weekdays.length) throw new Error("Chọn ít nhất một thứ trong tuần.");
+    const result = new Set(dates);
+    let matched = false;
+    for (let day = start; day <= end; day += dayMs) {
+        if (!weekdays.includes(new Date(day).getUTCDay())) continue;
+        matched = true;
+        result.add(dateString(day));
+        if (result.size > maxBatchDates) throw new Error(`Chỉ được chọn tối đa ${maxBatchDates} ngày.`);
+    }
+    if (!matched) throw new Error("Khoảng ngày không có thứ đã chọn.");
+    return [...result].sort();
+}
+
+export function toggleBatchDate(dates: string[], day: string): string[] {
+    dateMilliseconds(day);
+    if (dates.includes(day)) return dates.filter((value) => value !== day);
+    if (dates.length >= maxBatchDates) throw new Error(`Chọn tối đa ${maxBatchDates} ngày mỗi lần.`);
+    return [...dates, day].sort();
+}
+
+// shortcut: a batch slot never crosses midnight; use single-session creation for overnight sessions.
+const slotLocal = (draft: BatchDraft, day: string): SessionDraft => ({
+    classId: draft.classId, unit: draft.unit, lesson: draft.lesson, skills: draft.skills, sessionType: draft.sessionType, examSlot: draft.examSlot,
+    startsAtLocal: `${day}T${draft.startTime}`, endsAtLocal: `${day}T${draft.endTime}`,
+});
+
+export function validateBatchDraft(draft: BatchDraft): Record<string, string[]> {
+    const errors: Record<string, string[]> = {};
+    const valid = draft.dates.filter((day) => { try { dateMilliseconds(day); return true; } catch { return false; } });
+    if (!draft.dates.length || valid.length !== draft.dates.length || new Set(draft.dates).size !== draft.dates.length || draft.dates.length > maxBatchDates)
+        errors.dates = [`Chọn từ 1 đến ${maxBatchDates} ngày hợp lệ trên lịch, không lặp.`];
+    const { startsAtLocal, endsAtLocal, ...shared } = validateSessionDraft(slotLocal(draft, valid[0] ?? "2000-01-01"));
+    Object.assign(errors, shared);
+    if (startsAtLocal) errors.startTime = ["Nhập giờ bắt đầu hợp lệ (UTC+7)."];
+    if (endsAtLocal) errors.endTime = [draft.startTime && draft.endTime && !errors.startTime && /^\d{2}:\d{2}$/.test(draft.endTime) && draft.endTime <= draft.startTime
+        ? "Giờ kết thúc phải sau giờ bắt đầu trong cùng ngày." : "Nhập giờ kết thúc hợp lệ (UTC+7)."];
+    return errors;
+}
+
+export function batchSlots(draft: BatchDraft): { startsAtUtc: string; endsAtUtc: string }[] {
+    return [...draft.dates].sort().map((day) => ({
+        startsAtUtc: vietnamLocalToUtc(`${day}T${draft.startTime}`), endsAtUtc: vietnamLocalToUtc(`${day}T${draft.endTime}`),
+    }));
+}
+
+function batchRequest(path: string, draft: BatchDraft) {
+    const errors = validateBatchDraft(draft);
+    if (Object.keys(errors).length) throw new ApiError(400, "Vui lòng kiểm tra thông tin các buổi học.", errors);
+    return api<unknown>(`/academic/sessions/batch${path}`, {
+        method: "POST",
+        body: JSON.stringify({
+            classId: draft.classId, unit: draft.unit.trim(), lesson: draft.lesson.trim(),
+            skills: sessionSkills.filter((skill) => draft.skills.includes(skill)),
+            sessionType: draft.sessionType, examSlot: draft.examSlot.trim() || null, slots: batchSlots(draft),
+        }),
+    });
+}
+
+export const previewSessionBatch = async (draft: BatchDraft) => (await batchRequest("/preview", draft)) as BatchPreview;
+export const createSessionBatch = async (draft: BatchDraft) => (await batchRequest("", draft)) as ScheduledSession[];
+
 export async function cancelSession(item: ScheduledSession) {
     if (!isAcademicId(item.id)) throw new ApiError(400, "Mã buổi học không hợp lệ.");
     return api<ScheduledSession>(`/academic/sessions/${item.id}/cancel`, {

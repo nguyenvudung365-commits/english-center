@@ -71,6 +71,124 @@ public sealed class IdentityProfileTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StudentDirectory_PagesAndSearches_AndStaffEditsOnlyContactFields()
+    {
+        const string path = "/api/identity/users/students";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(path)).StatusCode);
+        await Login(Roles.Teacher);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(path)).StatusCode);
+        await Login(Roles.Staff);
+        var created = await client.PostAsJsonAsync("/api/identity/users", new CreateUserRequest("alice@example.test", "Alice Learner", Password, Roles.Student));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var first = await client.GetFromJsonAsync<JsonElement>($"{path}?pageSize=1");
+        var second = await client.GetFromJsonAsync<JsonElement>($"{path}?pageSize=1&page=2");
+        Assert.True((await client.GetAsync(path)).Headers.CacheControl?.NoStore);
+        Assert.Equal(2, first.GetProperty("total").GetInt32());
+        var student = Assert.Single(first.GetProperty("items").EnumerateArray());
+        Assert.Equal("Alice Learner", student.GetProperty("fullName").GetString());
+        Assert.Equal("Student", Assert.Single(second.GetProperty("items").EnumerateArray()).GetProperty("fullName").GetString());
+        foreach (var q in new[] { "alice", "ALICE@", student.GetProperty("studentCode").GetString()! })
+            Assert.Equal(1, (await client.GetFromJsonAsync<JsonElement>($"{path}?q={q}")).GetProperty("total").GetInt32());
+        Assert.Equal(0, (await client.GetFromJsonAsync<JsonElement>($"{path}?q=%25")).GetProperty("total").GetInt32());
+        foreach (var query in new[] { "page=0", "page=999999999", "pageSize=101", "page=abc", "q=" + new string('a', 201) })
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"{path}?{query}")).StatusCode);
+        var url = $"{path}/{student.GetProperty("id").GetGuid()}";
+        var record = await client.GetFromJsonAsync<JsonElement>(url);
+        Assert.False(record.TryGetProperty("passwordHash", out _));
+        var body = new { fullName = " Alice Updated ", email = "Alice@example.test", phone = "090 123 4567", expectedRevision = record.GetProperty("revision").GetGuid(), role = Roles.Admin, isLocked = true };
+        var update = await client.PutAsJsonAsync(url, body);
+        Assert.Equal(HttpStatusCode.OK, update.StatusCode);
+        var changed = await update.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("+84901234567", changed.GetProperty("phone").GetString());
+        foreach (var phoneQuery in new[] { "0901234567", "+84 90 123 4567", "901234567" })
+            Assert.Equal(1, (await client.GetFromJsonAsync<JsonElement>($"{path}?q={Uri.EscapeDataString(phoneQuery)}")).GetProperty("total").GetInt32());
+        Assert.Equal("Alice Updated", changed.GetProperty("fullName").GetString());
+        Assert.False(changed.GetProperty("isLocked").GetBoolean());
+        Assert.Equal(record.GetProperty("studentCode").GetString(), changed.GetProperty("studentCode").GetString());
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PutAsJsonAsync(url, body)).StatusCode);
+        var revision = changed.GetProperty("revision").GetGuid();
+        await AssertFieldError(await client.PutAsJsonAsync(url, body with { phone = "555-0199", expectedRevision = revision }), "Phone");
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PutAsJsonAsync(url, body with { email = "STAFF@example.test", expectedRevision = revision })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PutAsJsonAsync($"{path}/{(await Profile()).GetProperty("id").GetGuid()}", body)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"{url}/lock", new { isLocked = true, expectedRevision = revision })).StatusCode);
+        await Login(Roles.Admin);
+        Assert.Equal(2, (await client.GetFromJsonAsync<JsonElement>(path)).GetProperty("total").GetInt32());
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"{url}/lock", new { isLocked = true, expectedRevision = revision })).StatusCode);
+    }
+
+    [Fact]
+    public async Task StaffProvisioningAndAccountLock_RequireAdmin_AndRevokeSessions()
+    {
+        const string path = "/api/identity/users/staff";
+        var body = new { email = "new-staff@example.test", fullName = "New Staff", password = Password, role = Roles.Admin };
+        await Login(Roles.Staff);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(path, body)).StatusCode);
+        var originalStaff = await Profile();
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"{path}/{originalStaff.GetProperty("id").GetGuid()}/lock", new { isLocked = true, expectedRevision = originalStaff.GetProperty("revision").GetGuid() })).StatusCode);
+        await Login(Roles.Admin);
+        var created = await client.PostAsJsonAsync(path, body);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        Assert.Equal(Roles.Staff, (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("role").GetString());
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync(path, body)).StatusCode);
+        var adminToken = client.DefaultRequestHeaders.Authorization;
+        var login = await client.PostAsJsonAsync("/api/identity/auth/login", new LoginRequest(body.email, Password));
+        login.EnsureSuccessStatusCode();
+        var tokens = (await login.Content.ReadFromJsonAsync<TokenResponse>())!;
+        const string studentDirectory = "/api/identity/users/students";
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(studentDirectory)).StatusCode);
+        client.DefaultRequestHeaders.Authorization = adminToken;
+        var list = await client.GetFromJsonAsync<JsonElement>($"{path}?q=new-staff");
+        var staff = Assert.Single(list.GetProperty("items").EnumerateArray());
+        var url = $"{path}/{staff.GetProperty("id").GetGuid()}/lock";
+        var lockRequest = new { isLocked = true, expectedRevision = staff.GetProperty("revision").GetGuid() };
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PutAsJsonAsync($"{path}/{(await Profile()).GetProperty("id").GetGuid()}/lock", lockRequest)).StatusCode);
+        var locked = await client.PutAsJsonAsync(url, lockRequest);
+        Assert.Equal(HttpStatusCode.OK, locked.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PutAsJsonAsync(url, lockRequest)).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(studentDirectory)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/identity/auth/login", new LoginRequest(body.email, Password))).StatusCode);
+        client.DefaultRequestHeaders.Authorization = adminToken;
+        var revision = (await locked.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("revision").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(url, new { isLocked = false, expectedRevision = revision })).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/api/identity/auth/refresh", new RefreshRequest(tokens.RefreshToken))).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(studentDirectory)).StatusCode);
+        var freshLogin = await client.PostAsJsonAsync("/api/identity/auth/login", new LoginRequest(body.email, Password));
+        freshLogin.EnsureSuccessStatusCode();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            (await freshLogin.Content.ReadFromJsonAsync<TokenResponse>())!.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(studentDirectory)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Mobile_RejectsInvalidEditsButPreservesUnchangedLegacyValue()
+    {
+        await Login(Roles.Student);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var user = await db.Users.SingleAsync(x => x.Role == Roles.Student);
+            user.UpdateProfile(user.FullName, user.Email, "0123456789", null);
+            await db.SaveChangesAsync();
+        }
+        var before = await Profile();
+        var request = new UpdateProfileRequest("New name", "Student@example.test", "0123456789", null, before.GetProperty("revision").GetGuid());
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync("/api/identity/me", request)).StatusCode);
+        var updated = await Profile();
+        Assert.Equal("0123456789", updated.GetProperty("phone").GetString());
+        request = request with { ExpectedRevision = updated.GetProperty("revision").GetGuid() };
+        foreach (var invalid in new[] { "0281234567", "091234567", "+840912345678", "09a1234567", "０９１２３４５６７８", "0312345678" })
+            await AssertFieldError(await client.PutAsJsonAsync("/api/identity/me", request with { Phone = invalid }), "Phone");
+        Assert.Equal(updated.GetRawText(), (await Profile()).GetRawText());
+        var response = await client.PutAsJsonAsync("/api/identity/me", request with { Phone = "+84 91.234-5678" });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("+84912345678", (await Profile()).GetProperty("phone").GetString());
+    }
+
+    [Fact]
     public async Task Admin_ManagesTeacherProfileAndRevokesRefreshSessionsOnLock()
     {
         const string path = "/api/identity/users/teachers";
@@ -100,7 +218,7 @@ public sealed class IdentityProfileTests : IAsyncLifetime
         Assert.True(locked.IsLocked);
         var admin = client.DefaultRequestHeaders.Authorization;
         client.DefaultRequestHeaders.Authorization = teacherToken;
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/identity/me")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/identity/me")).StatusCode);
         client.DefaultRequestHeaders.Authorization = admin;
         Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(url + "/lock", new TeacherLockRequest(false, locked.Revision))).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/api/identity/auth/refresh", new RefreshRequest(tokens.RefreshToken))).StatusCode);
@@ -157,7 +275,7 @@ public sealed class IdentityProfileTests : IAsyncLifetime
         var saved = await Profile();
         Assert.Equal("Updated Student", saved.GetProperty("fullName").GetString());
         Assert.Equal("updated@example.test", saved.GetProperty("email").GetString());
-        Assert.Equal("0912345678", saved.GetProperty("phone").GetString());
+        Assert.Equal("+84912345678", saved.GetProperty("phone").GetString());
         Assert.Equal("Student", saved.GetProperty("role").GetString());
         Assert.Equal(profile.GetProperty("studentCode").GetString(), saved.GetProperty("studentCode").GetString());
         using var scope = factory.Services.CreateScope();
@@ -224,7 +342,7 @@ public sealed class IdentityProfileTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var created = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(role, created.GetProperty("role").GetString());
-        Assert.Equal("0912345678", created.GetProperty("phone").GetString());
+        Assert.Equal("+84912345678", created.GetProperty("phone").GetString());
         foreach (var secret in new[] { "password", "passwordHash", "accessToken", "refreshToken" })
             Assert.False(created.TryGetProperty(secret, out _));
         Assert.Equal(authorization, client.DefaultRequestHeaders.Authorization);
@@ -298,6 +416,7 @@ public sealed class IdentityProfileTests : IAsyncLifetime
         yield return ["Email", "not-an-email"];
         yield return ["Email", new string('e', 245) + "@example.test"];
         yield return ["Phone", new string('1', 33)];
+        yield return ["Phone", "0281234567"];
     }
 
     [Theory]
@@ -331,7 +450,7 @@ public sealed class IdentityProfileTests : IAsyncLifetime
         var before = await Profile();
         var email = new string('e', 64) + "@" + new string('a', 63) + "." + new string('b', 63) + "." + new string('c', 61);
         Assert.Equal(254, email.Length);
-        var request = new UpdateProfileRequest(new string('n', 200), email, new string('1', 32), null, before.GetProperty("revision").GetGuid());
+        var request = new UpdateProfileRequest(new string('n', 200), email, "+84912345678", null, before.GetProperty("revision").GetGuid());
         Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync("/api/identity/me", request)).StatusCode);
         var saved = await Profile();
         Assert.Equal(request.FullName, saved.GetProperty("fullName").GetString());
@@ -370,12 +489,12 @@ public sealed class IdentityProfileTests : IAsyncLifetime
         await Login(role);
         var before = await Profile();
         var response = await client.PutAsJsonAsync("/api/identity/me", new UpdateProfileRequest(
-            "Updated " + role, $"{role}@example.test", "  0123456789  ", null, before.GetProperty("revision").GetGuid()));
+            "Updated " + role, $"{role}@example.test", "  0912345678  ", null, before.GetProperty("revision").GetGuid()));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var saved = await Profile();
         Assert.Equal(before.GetProperty("id").GetGuid(), saved.GetProperty("id").GetGuid());
         Assert.Equal("Updated " + role, saved.GetProperty("fullName").GetString());
-        Assert.Equal("0123456789", saved.GetProperty("phone").GetString());
+        Assert.Equal("+84912345678", saved.GetProperty("phone").GetString());
         Assert.NotEqual(before.GetProperty("revision").GetGuid(), saved.GetProperty("revision").GetGuid());
         using var scope = factory.Services.CreateScope();
         var others = await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Users.Where(x => x.Role != role).ToListAsync();
@@ -511,10 +630,10 @@ public sealed class IdentityProfileTests : IAsyncLifetime
         var before = await Profile();
         factory.TeacherSync.Fail = true;
         var response = await client.PutAsJsonAsync("/api/identity/me", new UpdateProfileRequest(
-            "Teacher", "Teacher@example.test", "0123456789", null, before.GetProperty("revision").GetGuid()));
+            "Teacher", "Teacher@example.test", "0912345678", null, before.GetProperty("revision").GetGuid()));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Empty(factory.TeacherSync.Observed);
-        Assert.Equal("0123456789", (await Profile()).GetProperty("phone").GetString());
+        Assert.Equal("+84912345678", (await Profile()).GetProperty("phone").GetString());
     }
 
     private async Task<Guid> AvatarFile(Guid owner, bool confirmed = true, string purpose = "avatar")

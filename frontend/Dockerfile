@@ -4,6 +4,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 ARG VITE_SUPPORT_ZALO_URL
+ARG VITE_SUPPORT_EMAIL
 RUN npm test && npm run build
 
 FROM nginxinc/nginx-unprivileged:1.28-alpine

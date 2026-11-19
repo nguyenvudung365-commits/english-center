@@ -1,5 +1,12 @@
 import { expect, it } from "vitest";
-import { zaloSupportUrl } from "./support-contact";
+import { supportEmail, zaloSupportUrl } from "./support-contact";
+
+it("accepts one public mailbox, never a mailto URL or email headers", () => {
+    expect(supportEmail(" support+web@example.test ")).toBe("support+web@example.test");
+    for (const value of [undefined, "", "support@example.test?cc=x", "me@example.test\r\nBcc:x",
+        "user%0a@example.test", "a@localhost", "a@example.test,b@example.test", "mailto:a@example.test"])
+        expect(supportEmail(value)).toBeNull();
+});
 
 it("only exposes configured HTTPS Zalo links", () => {
     expect(zaloSupportUrl(" https://zalo.me/example ")).toBe("https://zalo.me/example");

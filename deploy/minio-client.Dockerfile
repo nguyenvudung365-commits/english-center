@@ -8,4 +8,5 @@ FROM alpine:3.22
 RUN apk add --no-cache ca-certificates
 COPY --from=build /go/bin/mc /usr/local/bin/mc
 COPY deploy/minio-init.sh /usr/local/bin/minio-init.sh
+RUN sed -i 's/\r$//' /usr/local/bin/minio-init.sh
 ENTRYPOINT ["/bin/sh", "/usr/local/bin/minio-init.sh"]

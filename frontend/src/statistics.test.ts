@@ -161,13 +161,20 @@ describe("Statistics and progress transport through the real session client", ()
         ["statistics", () => getPersonalStatistics("2026-11")],
         ["progress", () => getClassProgress(classId)],
     ] as const) {
-        it.each([400, 403, 404, 409, 503])(`${name} preserves server failure %s instead of fabricating empty/partial zeros`, async (status) => {
+        it.each([
+            [400, "Dữ liệu chưa hợp lệ. Vui lòng kiểm tra lại."],
+            [403, "Bạn không có quyền thực hiện thao tác này."],
+            [404, "Không tìm thấy nội dung yêu cầu."],
+            [409, "Không thể lưu do dữ liệu bị trùng hoặc đã thay đổi. Hãy kiểm tra và thử lại."],
+            [503, "Máy chủ đang gặp sự cố. Vui lòng thử lại."],
+        ])(`${name} presents server failure %s in Vietnamese instead of fabricating empty/partial zeros`, async (status, message) => {
             const errors = { Query: ["Request failed."] };
             fetcher.mockResolvedValue(json({ title: "Academic query failed", errors }, status));
             const operation = load();
             await expect(operation).rejects.toBeInstanceOf(ApiError);
-            await expect(operation).rejects.toMatchObject({ status, errors,
-                message: status === 403 ? "Bạn không có quyền thực hiện thao tác này." : "Academic query failed" });
+            await expect(operation).rejects.toMatchObject({
+                status, message, errors: { Query: ["Giá trị này không hợp lệ. Vui lòng kiểm tra lại."] },
+            });
             expect(fetcher).toHaveBeenCalledTimes(1);
             expect(getSession()).not.toBeNull();
         });

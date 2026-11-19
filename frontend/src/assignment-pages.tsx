@@ -7,15 +7,16 @@ import { MyEnrollments } from "./enrollment-pages";
 import { allVisibleClasses, ReadFeedback } from "./attendance-pages";
 import {
     assignmentKindLabel, assignmentKinds, assignmentKindLabels, assignmentStatuses, assignmentStatusLabel, assignmentStatusLabels,
-    ASSIGNMENT_DESCRIPTION_MAX, ASSIGNMENT_LESSON_MAX, ASSIGNMENT_TITLE_MAX, ASSIGNMENT_UNIT_MAX, canGrade, createAssignment, emptyAssignmentDraft, FEEDBACK_MAX,
-    formatScore, gradeSubmission, isAssignmentLocked, isGraded, listClassAssignments, listGradeHistory, listMyAssignments, publishAssignment,
-    scoreInput, studentLabel, studentScoreText, submissionStatuses, submissionStatusLabel, submissionStatusLabels, updateAssignment, validateAssignmentDraft,
+    ASSIGNMENT_DESCRIPTION_MAX, ASSIGNMENT_LESSON_MAX, ASSIGNMENT_TITLE_MAX, ASSIGNMENT_UNIT_MAX, canDownloadPrompt, canGrade, createAssignment, emptyAssignmentDraft, FEEDBACK_MAX,
+    formatScore, gradeSubmission, isAssignmentLocked, isExamKind, isGraded, listClassAssignments, listGradeHistory, listMyAssignments, promptDownload, publishAssignment,
+    safeDownloadUrl, scoreInput, studentLabel, studentScoreText, submissionStatuses, submissionStatusLabel, submissionStatusLabels, updateAssignment, validateAssignmentDraft,
     validateGradeDraft, type AssignmentDraft, type GradeDraft,
 } from "./coursework";
 import { formatVnDateTime, utcToVnLocal } from "./format";
+import { getManagedStudent, listManagedAccounts } from "./identity";
 import { calendarRange, getScheduledSession, listSessions } from "./schedule";
 import { ErrorMessage, FieldError, fieldProps, PageHeading, Pager } from "./ui";
-import { submissionAccept, submitAssignment, validateSubmissionFiles, type Assignment, type Submission, type UploadStatus } from "./submissions";
+import { ANSWER_MAX, examAccept, submissionAccept, submitAssignment, validateSubmissionFiles, type Assignment, type Submission, type UploadStatus } from "./submissions";
 
 // All mutations have one in-flight owner and ignore completion after navigation or login changes.
 export function useAction() {
@@ -64,17 +65,18 @@ export function Conflict({ error, text, onReload }: { error: unknown; text: stri
     </div>;
 }
 
-export function ClassSelect({ id, value, onChange, allLabel }: { id: string; value: string; onChange: (classId: string) => void; allLabel?: string }) {
+export function ClassSelect({ id, value, onChange, allLabel, destinationOf }: { id: string; value: string; onChange: (classId: string) => void; allLabel?: string; destinationOf?: string }) {
     const classes = useLoad(allVisibleClasses);
+    const options = classes.data?.filter(item => !destinationOf || (item.id !== destinationOf && item.status !== "Finished"));
     return <div className="academic-field">
-        <label htmlFor={id}>Lớp học</label>
+        <label htmlFor={id}>{destinationOf ? "Lớp đích" : "Lớp học"}</label>
         <select id={id} value={value} disabled={classes.loading || !!classes.error} onChange={event => onChange(event.target.value)}>
             <option value="">{allLabel ?? "Chọn lớp học"}</option>
             {value && !classes.data?.some(item => item.id === value) && <option value={value}>Lớp đang chọn (máy chủ xác minh quyền)</option>}
-            {classes.data?.map(item => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}
+            {options?.map(item => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}
         </select>
         <ReadFeedback result={classes} />
-        {classes.data?.length === 0 && <p>Chưa có lớp nào trong phạm vi tài khoản của bạn.</p>}
+        {options?.length === 0 && <p>{destinationOf ? "Không có lớp đích phù hợp." : "Chưa có lớp nào trong phạm vi tài khoản của bạn."}</p>}
     </div>;
 }
 
@@ -135,7 +137,8 @@ function StudentAssignments() {
                     {data.items.map(entry => {
                         const score = studentScoreText(entry.submissionStatus, entry.score);
                         return <li key={entry.assignment.id}>
-                            <h3><Link className="accent" to={`/assignments/${entry.assignment.id}`}>{entry.assignment.title}</Link></h3>
+                            <h3>{entry.isTransferredHistory ? entry.assignment.title : <Link className="accent" to={`/assignments/${entry.assignment.id}`}>{entry.assignment.title}</Link>}</h3>
+                            {entry.isTransferredHistory && <p className="small muted">Kết quả từ lớp cũ</p>}
                             <p><AssignmentBadges item={entry.assignment} /></p>
                             {(entry.assignment.unit || entry.assignment.lesson) && <p className="small muted">{[entry.assignment.unit, entry.assignment.lesson].filter(Boolean).join(" · ")}</p>}
                             <p>Hạn nộp: <time dateTime={entry.assignment.closesAtUtc}>{formatVnDateTime(entry.assignment.closesAtUtc)}</time> (UTC+7)</p>
@@ -160,15 +163,15 @@ function ManagerAssignments() {
     return <>
         <PageHeading title="Bài tập" subtitle="Chọn lớp để xem, giao bài và theo dõi bài nộp. Chỉ thành viên và giáo viên phụ trách được truy cập." />
         <section className="panel">
-            <form className="academic-filters" onSubmit={event => { event.preventDefault(); setFilter(previous => ({ ...previous, search: input.trim() })); }}>
+            <form className="academic-filters coursework-filters" onSubmit={event => { event.preventDefault(); if (classId) setFilter(previous => ({ ...previous, search: input.trim() })); }}>
                 <ClassSelect id="assignment-class" value={classId} onChange={value => { const next = new URLSearchParams(params); if (value) next.set("classId", value); else next.delete("classId"); setParams(next); }} />
-                <div className="academic-field">
+                {classId && <><div className="academic-field">
                     <label htmlFor="assignment-search">Tìm theo tiêu đề, Unit hoặc Lesson</label>
                     <input id="assignment-search" type="search" maxLength={100} value={input} onChange={event => setInput(event.target.value)} />
                 </div>
                 <FilterSelect id="assignment-status" label="Trạng thái" value={filter.status} values={assignmentStatuses} labels={assignmentStatusLabels} all="Tất cả trạng thái" onChange={value => setFilter(previous => ({ ...previous, status: value }))} />
                 <FilterSelect id="assignment-kind" label="Loại bài" value={filter.kind} values={assignmentKinds} labels={assignmentKindLabels} all="Tất cả loại" onChange={value => setFilter(previous => ({ ...previous, kind: value }))} />
-                <button className="primary">Tìm bài tập</button>
+                <button className="primary">Tìm bài tập</button></>}
             </form>
             {!classId && <p>Chọn một lớp để xem danh sách bài tập.</p>}
             {classId && <ReadFeedback result={items} />}
@@ -231,13 +234,13 @@ function SessionLabel({ id }: { id: string }) {
     return <>{[session.data.unit, session.data.lesson].filter(Boolean).join(" · ")} · {formatVnDateTime(session.data.startsAtUtc)} (UTC+7)</>;
 }
 
-function AssignmentForm({ id, classId, initial, locked, create, busy, children, submitLabel, onSubmit, onCancel }: {
+function AssignmentForm({ id, classId, initial, locked, create, busy, children, submitLabel, promptName, onSubmit, onCancel }: {
     id: string; classId: string; initial: AssignmentDraft; locked: boolean; create: boolean; busy: boolean; children?: ReactNode;
-    submitLabel: string; onSubmit: (draft: AssignmentDraft) => void; onCancel?: () => void;
+    submitLabel: string; promptName?: string | null; onSubmit: (draft: AssignmentDraft) => void; onCancel?: () => void;
 }) {
     const [draft, setDraft] = useState(initial);
     const [attempted, setAttempted] = useState(false);
-    const errors = validateAssignmentDraft(draft, locked, create && !draft.saveAsDraft);
+    const errors = validateAssignmentDraft(draft, locked, create && !draft.saveAsDraft, !!promptName);
     const shown = attempted ? errors : {};
     const set = (patch: Partial<AssignmentDraft>) => setDraft({ ...draft, ...patch });
     return <form className="academic-form" noValidate aria-busy={busy} onSubmit={event => {
@@ -262,6 +265,13 @@ function AssignmentForm({ id, classId, initial, locked, create, busy, children, 
             </select>
             <FieldError id={`${id}-kind`} errors={shown.kind} />
         </div>
+        {!locked && <div className="academic-field">
+            <label htmlFor={`${id}-prompt`}>{isExamKind(draft.kind) ? "Đề thi" : "Đề bài (không bắt buộc)"} · PDF, tối đa 20 MiB</label>
+            {promptName && <p className="small muted">Đề hiện tại: {promptName}. Chọn file mới để thay (chỉ thay được khi bài chưa công bố).</p>}
+            <input {...fieldProps(`${id}-prompt`, shown.promptFile)} type="file" accept={examAccept} disabled={busy} onChange={event => set({ promptFile: event.target.files?.[0] ?? null })} />
+            <FieldError id={`${id}-prompt`} errors={shown.promptFile} />
+            <p className="small muted">Học viên chỉ tải được file đề khi bài đang mở.</p>
+        </div>}
         <div className="academic-field">
             <label htmlFor={`${id}-unit`}>Unit (tối đa {ASSIGNMENT_UNIT_MAX} ký tự)</label>
             <input {...fieldProps(`${id}-unit`, shown.unit)} maxLength={ASSIGNMENT_UNIT_MAX} disabled={busy} value={draft.unit} onChange={event => set({ unit: event.target.value })} />
@@ -302,7 +312,7 @@ function AssignmentCreate({ classId }: { classId: string }) {
         <h2>Giao bài mới</h2>
         <p>Giáo viên chỉ giao bài cho lớp phụ trách. Mặc định công bố ngay; chọn “Lưu nháp” để công bố sau.</p>
         <AssignmentForm id="new-assignment" classId={classId} initial={emptyAssignmentDraft()} locked={false} create busy={action.busy} submitLabel="Công bố bài tập"
-            onSubmit={draft => void action.run(() => createAssignment(classId, draft), item => navigate(`/assignments/${item.id}`))}>
+            onSubmit={draft => void action.run(signal => createAssignment(classId, draft, signal), item => navigate(`/assignments/${item.id}`))}>
             <ErrorMessage error={action.error} />
         </AssignmentForm>
     </section>;
@@ -336,10 +346,32 @@ export function AssignmentDetails() {
                     {role !== "Student" && <><dt>ID lớp</dt><dd><code>{current.classId}</code></dd><dt>Phiên bản</dt><dd>{current.version}</dd></>}
                 </dl>
             </section>
+            {(isExamKind(current.kind) || current.promptFileName) && <AssignmentPrompt key={`${current.id}:${current.status}:${current.version}`} assignment={current} role={role} />}
             {role !== "Student" && <AssignmentManage item={current} onChanged={setChanged} onReload={reload} />}
             {role === "Student" ? <StudentSubmission assignment={current} /> : <SubmissionReview assignmentId={id} role={role} />}
         </>}
     </>;
+}
+
+// Đề thi PDF: học viên chỉ lấy được link khi bài đang mở; giáo viên/nhân viên bất cứ lúc nào. Máy chủ kiểm tra lại mọi lần.
+function AssignmentPrompt({ assignment, role }: { assignment: Assignment; role: import("./api").Role }) {
+    const action = useAction();
+    const [link, setLink] = useState<{ url: string; expiresAt: string } | null>(null);
+    const allowed = canDownloadPrompt(assignment, role);
+    const label = isExamKind(assignment.kind) ? "đề thi" : "đề bài";
+    return <section className="panel"><h2>{isExamKind(assignment.kind) ? "Đề thi" : "Đề bài PDF"}</h2>
+        <p>{assignment.promptFileName ?? "Bài thi chưa có đề."}</p>
+        {!allowed && role === "Student" && <p className="notice" role="status">Chỉ tải được {label} khi bài đang mở (hiện: {assignmentStatusLabel(assignment.status)}).</p>}
+        {allowed && <button type="button" className="secondary" disabled={action.busy} onClick={() => {
+            setLink(null);
+            void action.run(async signal => {
+                const ticket = await promptDownload(assignment.id, signal);
+                return { ...ticket, url: safeDownloadUrl(ticket) };
+            }, setLink);
+        }}>{action.busy ? "Đang lấy link…" : `Lấy link tải ${label}`}</button>}
+        <ErrorMessage error={action.error} />
+        {link && <p role="status"><a href={link.url} target="_blank" rel="noopener noreferrer">Tải {label} (mở tab mới)</a> · Link hết hạn {new Date(link.expiresAt).toLocaleTimeString("vi-VN")}</p>}
+    </section>;
 }
 
 function AssignmentManage({ item, onChanged, onReload }: { item: Assignment; onChanged: (value: Assignment) => void; onReload: () => void }) {
@@ -360,9 +392,10 @@ function AssignmentManage({ item, onChanged, onReload }: { item: Assignment; onC
             <button type="button" className="secondary" aria-expanded={editing} disabled={busy} onClick={() => { setEditing(value => !value); setNotice(""); }}>{editing ? "Đóng form sửa" : "Sửa bài tập"}</button>
         </div>
         {editing && <AssignmentForm key={item.version} id="edit-assignment" classId={item.classId} locked={isAssignmentLocked(item)} create={false} busy={save.busy} submitLabel="Lưu thay đổi"
-            initial={{ title: item.title, description: item.description, kind: item.kind, unit: item.unit ?? "", lesson: item.lesson ?? "", opensLocal: utcToVnLocal(item.opensAtUtc), closesLocal: utcToVnLocal(item.closesAtUtc), sessionId: item.sessionId ?? "", saveAsDraft: false }}
+            initial={{ title: item.title, description: item.description, kind: item.kind, unit: item.unit ?? "", lesson: item.lesson ?? "", opensLocal: utcToVnLocal(item.opensAtUtc), closesLocal: utcToVnLocal(item.closesAtUtc), sessionId: item.sessionId ?? "", saveAsDraft: false, promptFile: null }}
+            promptName={item.promptFileName}
             onCancel={() => setEditing(false)}
-            onSubmit={draft => void save.run(() => updateAssignment(item, draft), value => { onChanged(value); setEditing(false); setNotice("Đã lưu thay đổi."); })}>
+            onSubmit={draft => void save.run(signal => updateAssignment(item, draft, signal), value => { onChanged(value); setEditing(false); setNotice("Đã lưu thay đổi."); })}>
             <Conflict error={save.error} text="Không lưu được: bài đã thay đổi hoặc không cho phép sửa trường này sau khi công bố." onReload={onReload} />
         </AssignmentForm>}
         <p role="status">{notice}</p>
@@ -374,18 +407,21 @@ function StudentSubmission({ assignment }: { assignment: Assignment }) {
     const existing = useRead<Submission>(path, true);
     const [saved, setSaved] = useState<Submission | null>(null);
     const [files, setFiles] = useState<File[]>([]);
+    const [draftAnswer, setDraftAnswer] = useState<string | null>(null);
     const [progress, setProgress] = useState<Record<number, UploadStatus>>({});
     const [notice, setNotice] = useState("");
     const input = useRef<HTMLInputElement>(null);
     const action = useAction(); const reload = useAction();
     const current = saved ?? existing.data;
     const graded = !!current && isGraded(current);
-    const error = validateSubmissionFiles(files);
+    const exam = isExamKind(assignment.kind);
+    const answer = exam ? "" : draftAnswer ?? current?.answerText ?? "";
+    const error = !files.length && answer.trim() ? null : validateSubmissionFiles(files);
     const conflict = action.error instanceof ApiError && action.error.status === 409;
     const [acknowledgedError, setAcknowledgedError] = useState<unknown>(null);
     const conflictBlocked = conflict && acknowledgedError !== action.error;
     const pending = action.busy || reload.busy;
-    const locked = existing.loading || !!existing.error || conflictBlocked || graded;
+    const locked = existing.loading || !!existing.error || conflictBlocked || graded || assignment.status !== "Open";
     const statusText = { uploading: "Đang tải", confirming: "Đang xác nhận", confirmed: "Đã xác nhận" };
     return <section className="panel">
         <h2>Bài nộp của tôi</h2>
@@ -393,11 +429,12 @@ function StudentSubmission({ assignment }: { assignment: Assignment }) {
         <ErrorMessage error={existing.error} />
         {!existing.loading && !existing.error && !current && <p>Bạn chưa nộp bài.</p>}
         {current && <SubmissionAttachments key={`${current.id}:${current.revision}`} submission={current} />}
+        {current?.answerText && <div><h3>Câu trả lời đã nộp</h3><p className="assignment-description written-answer">{current.answerText}</p></div>}
         {current && <div aria-label="Điểm và nhận xét">
             <h3>Điểm và nhận xét</h3>
             <p>Điểm: <strong>{formatScore(current.score)}</strong>{graded && " / 10"}{graded && current.gradedAt && <> · Chấm lúc {formatVnDateTime(current.gradedAt)} (UTC+7)</>}</p>
             {graded && (current.feedback ? <p className="assignment-description">Nhận xét: {current.feedback}</p> : <p className="small muted">Giáo viên chưa ghi nhận xét.</p>)}
-            {graded && <p className="notice" role="status">Bài đã được chấm nên không thể nộp thay file.</p>}
+            {graded && <p className="notice" role="status">Bài đã được chấm nên không thể nộp lại.</p>}
         </div>}
         <button type="button" className="secondary" disabled={pending} onClick={() => {
             void reload.run(async signal => {
@@ -406,15 +443,21 @@ function StudentSubmission({ assignment }: { assignment: Assignment }) {
             }, value => { setSaved(value); setAcknowledgedError(action.error); existing.reload(); setNotice("Đã tải lại bản hiện tại. Hãy kiểm tra trước khi nộp thay thế."); });
         }}>{reload.busy ? "Đang tải…" : "Tải lại bài hiện tại"}</button>
         <ErrorMessage error={reload.error} />
-        <p id="submission-help">1–5 file; tối đa 20 MiB/file, tổng 50 MiB. PDF, DOCX, MP3, M4A, JPG, PNG. Nộp lại sẽ thay toàn bộ file đính kèm; file cũ chỉ được thay khi lưu thành công. Giới hạn máy chủ có thể thấp hơn.</p>
+        {assignment.status !== "Open" && <p className="notice">Chỉ nộp được trong thời gian nhận bài.</p>}
+        {!graded && assignment.status === "Open" && <><p id="submission-help">{exam ? "Chọn 1–5 file." : "Nhập câu trả lời, đính kèm tối đa 5 file, hoặc cả hai."} Tối đa 20 MiB/file, tổng 50 MiB. PDF, DOCX, MP3, M4A, JPG, PNG. Nếu nộp lại, hãy chọn lại mọi file muốn giữ.</p>
         <form className="academic-form" aria-busy={pending} onSubmit={event => {
             event.preventDefault(); if (error || pending || locked) return;
             setNotice(""); setProgress({});
-            void action.run(signal => submitAssignment(assignment.id, files, current?.revision ?? null, (index, status) => { if (!signal.aborted) setProgress(value => ({ ...value, [index]: status })); }, signal), value => {
-                setSaved(value); setFiles([]); setProgress({}); if (input.current) input.current.value = "";
-                setNotice("Đã lưu bài nộp cùng toàn bộ file đính kèm.");
+            void action.run(signal => submitAssignment(assignment.id, files, current?.revision ?? null, (index, status) => { if (!signal.aborted) setProgress(value => ({ ...value, [index]: status })); }, signal, answer), value => {
+                setSaved(value); setDraftAnswer(null); setFiles([]); setProgress({}); if (input.current) input.current.value = "";
+                setNotice("Đã lưu bài nộp.");
             });
         }}>
+            {!exam && <div className="academic-field">
+                <label htmlFor="submission-answer">Câu trả lời trực tiếp</label>
+                <textarea id="submission-answer" rows={8} maxLength={ANSWER_MAX} aria-describedby="submission-answer-limit submission-help" disabled={pending || existing.loading} value={answer} onChange={event => { setDraftAnswer(event.target.value); setNotice(""); }} />
+                <p className="small muted" id="submission-answer-limit">{answer.length.toLocaleString("vi-VN")} / {ANSWER_MAX.toLocaleString("vi-VN")} ký tự</p>
+            </div>}
             <label htmlFor="submission-files">Chọn file cho bài nộp mới</label>
             <input ref={input} id="submission-files" type="file" multiple accept={submissionAccept} aria-describedby="submission-help submission-validation" disabled={pending || graded} onChange={event => { setFiles(Array.from(event.target.files ?? [])); event.target.value = ""; setProgress({}); setNotice(""); }} />
             <ul className="submission-list" aria-live="polite">{files.map((file, index) => <li key={`${index}:${file.name}`}>
@@ -423,9 +466,9 @@ function StudentSubmission({ assignment }: { assignment: Assignment }) {
             </li>)}</ul>
             <p id="submission-validation">{error ?? `Đã chọn ${files.length} file · ${(files.reduce((sum, file) => sum + file.size, 0) / 1024 / 1024).toFixed(2)} MiB`}</p>
             <ErrorMessage error={action.error} />
-            {conflictBlocked && <p role="alert">Máy chủ từ chối lưu (bản đã thay đổi hoặc ngoài giờ nộp). Tải lại bài hiện tại trước khi thử lại; file đang chọn vẫn được giữ.</p>}
-            <button className="primary" disabled={pending || locked || !!error}>{action.busy ? "Đang tải và lưu…" : current ? "Nộp thay thế toàn bộ file" : "Nộp bài"}</button>
-        </form>
+            {conflictBlocked && <p role="alert">Bản đã thay đổi hoặc ngoài giờ nộp. Tải lại bài đã lưu trước khi thử lại; câu trả lời đang nhập và file đang chọn vẫn được giữ.</p>}
+            <button className="primary" disabled={pending || locked || !!error}>{action.busy ? "Đang lưu…" : current ? "Nộp lại bài" : "Nộp bài"}</button>
+        </form></>}
         <p role="status">{notice}</p>
     </section>;
 }
@@ -460,6 +503,7 @@ function ReviewItem({ submission, role, onSaved, onReload }: { submission: Submi
     const graded = isGraded(submission);
     const name = studentLabel(submission);
     return <article className="submission-review"><h3>{name ? <>Học viên {name}</> : <>Học viên <code>{submission.studentId}</code></>}</h3>
+        {submission.answerText && <p className="assignment-description written-answer">{submission.answerText}</p>}
         <SubmissionAttachments key={`${submission.id}:${submission.revision}`} submission={submission} />
         <p>Điểm hiện tại: <strong>{formatScore(submission.score)}</strong>{graded && <> / 10 · phiên bản {submission.gradeVersion}{submission.gradedAt && <> · Chấm lúc {formatVnDateTime(submission.gradedAt)} (UTC+7)</>}</>}</p>
         {graded && submission.feedback && <p className="assignment-description">Nhận xét: {submission.feedback}</p>}
@@ -542,57 +586,113 @@ function SubmissionAttachments({ submission }: { submission: Submission }) {
     </div>;
 }
 
-type Enrollment = { id: string; classId: string; studentId: string; isActive: boolean };
+type Enrollment = { id: string; classId: string; studentId: string; isActive: boolean; status: string };
 export function Enrollments() {
+    const [params] = useSearchParams();
     const user = identity(getSession());
     if (!user) return null;
     if (user.role === "Student") return <MyEnrollments />;
-    return <ManageEnrollments />;
+    const requested = params.get("studentId") ?? "";
+    const studentId = isAcademicId(requested) ? requested : "";
+    return <ManageEnrollments key={studentId} initialStudentId={studentId} />;
 }
 
-function ManageEnrollments() {
-    const [classId, setClassId] = useState(""); const [studentId, setStudentId] = useState("");
-    const [items, setItems] = useState<Enrollment[] | null>(null); const [loadedClass, setLoadedClass] = useState("");
+function ManageEnrollments({ initialStudentId }: { initialStudentId: string }) {
+    const [classId, setClassId] = useState(""); const [studentId, setStudentId] = useState(initialStudentId);
+    const [search, setSearch] = useState({ q: "", page: 1 });
     const [notice, setNotice] = useState("");
+    const [transferId, setTransferId] = useState("");
+    const [targetClassId, setTargetClassId] = useState("");
     const action = useAction();
     const manager = canManageAcademic(identity(getSession())!.role);
+    const validClass = manager && isAcademicId(classId);
+    const loadRoster = useCallback(() => validClass ? api<Enrollment[]>(`/enrollment/memberships?classId=${classId}`) : Promise.resolve([]), [classId, validClass]);
+    const loadStudents = useCallback(() => manager ? listManagedAccounts("students", search) : Promise.resolve(null), [manager, search]);
+    const loadInitialStudent = useCallback(() => manager && initialStudentId ? getManagedStudent(initialStudentId) : Promise.resolve(null), [manager, initialStudentId]);
+    const roster = useLoad(loadRoster);
+    const students = useLoad(loadStudents);
+    const initialStudent = useLoad(loadInitialStudent);
     if (!manager) return <><PageHeading title="Thành viên lớp" subtitle="Chỉ giáo vụ và quản trị viên quản lý thành viên lớp." /><p>Liên hệ giáo vụ để kiểm tra quyền học tập của bạn. Học viên không thể tự ghi danh qua trang này.</p></>;
-    const validClass = isAcademicId(classId.trim());
+    const options = students.data?.items ?? [];
+    const linkedStudent = initialStudent.data;
+    const candidates = linkedStudent && !options.some(item => item.id === linkedStudent.id) ? [linkedStudent, ...options] : options;
+    const canEnroll = validClass && candidates.some(item => item.id === studentId && !item.isLocked);
     return <>
-        <PageHeading title="Thành viên lớp" subtitle="Cấp hoặc thu hồi quyền truy cập bài tập cho học viên đã ghi danh. Trang này không tạo ghi danh, hóa đơn hay thay đổi sĩ số." />
-        <section className="panel"><h2>Tra cứu theo lớp</h2>
+        <PageHeading title="Ghi danh và thành viên lớp" subtitle="Chọn lớp và học viên để ghi danh. Hóa đơn học phí được tạo theo mức phí của lớp; giáo vụ xác nhận khoản đã thu ở mục Hóa đơn." />
+        <section className="panel"><h2>Ghi danh học viên</h2>
+            <fieldset className="session-skills" disabled={action.busy}>
+                <legend>Chọn lớp</legend>
+                 <ClassSelect id="roster-class" value={classId} onChange={id => { setClassId(id); setNotice(""); setTransferId(""); setTargetClassId(""); }} />
+            </fieldset>
             <form className="academic-form" onSubmit={event => {
-                event.preventDefault(); if (!validClass) return;
-                const id = classId.trim(); setNotice("");
-                void action.run(signal => api<Enrollment[]>(`/enrollment/memberships?classId=${id}`, { signal }), value => { setItems(value); setLoadedClass(id); });
+                event.preventDefault();
+                setStudentId(""); setSearch({ q: String(new FormData(event.currentTarget).get("search")).trim(), page: 1 });
             }}>
-                <label htmlFor="roster-class">ID lớp (UUID)</label><input id="roster-class" value={classId} disabled={action.busy} onChange={event => { setClassId(event.target.value); setItems(null); setLoadedClass(""); }} required />
-                <button className="secondary" disabled={action.busy || !validClass}>Tải thành viên</button>
+                <label htmlFor="roster-search">Tìm học viên theo tên, email hoặc mã</label>
+                <input id="roster-search" name="search" type="search" maxLength={100} disabled={action.busy} />
+                <button className="secondary" disabled={action.busy}>Tìm học viên</button>
             </form>
-            <h2>Cấp quyền học tập</h2>
+            <ReadFeedback result={students} />
+            {initialStudentId && <ReadFeedback result={initialStudent} />}
             <form className="academic-form" onSubmit={event => {
-                event.preventDefault(); if (!validClass || !isAcademicId(studentId.trim())) return;
-                const id = classId.trim(); setNotice("");
-                void action.run(signal => api<Enrollment>("/enrollment/memberships", { method: "POST", body: JSON.stringify({ classId: id, studentId: studentId.trim() }), signal }), value => {
-                    setItems(previous => loadedClass === id && previous ? [...previous.filter(item => item.id !== value.id), value] : [value]); setLoadedClass(id);
-                    setStudentId(""); setNotice("Đã cấp quyền học tập. Bấm Tải thành viên để xem toàn bộ danh sách.");
+                event.preventDefault(); if (!canEnroll) return;
+                const form = new FormData(event.currentTarget);
+                const body = { classId, studentId, maxAbsences: Number(form.get("maxAbsences")), maxLates: Number(form.get("maxLates")), maxSkippedAssignments: Number(form.get("maxSkippedAssignments")) };
+                setNotice("");
+                void action.run(signal => api<Enrollment>("/enrollment/enrollments", { method: "POST", body: JSON.stringify(body), signal }), () => {
+                    setNotice("Đã ghi danh học viên."); roster.retry();
                 });
             }}>
-                <label htmlFor="roster-student">ID tài khoản học viên (UUID)</label><input id="roster-student" value={studentId} disabled={action.busy} onChange={event => setStudentId(event.target.value)} required />
-                <p>Học viên phải có ghi danh còn hiệu lực trong lớp. Nếu chưa có, giáo vụ cần hoàn tất ghi danh với học phí và giới hạn vi phạm trước khi cấp quyền học tập.</p>
-                <button className="primary" disabled={action.busy || !validClass || !isAcademicId(studentId.trim())}>Cấp quyền cho lớp ở trên</button>
+                <label htmlFor="roster-student">Học viên</label>
+                <select id="roster-student" value={studentId} disabled={action.busy || students.loading || !students.data} onChange={event => setStudentId(event.target.value)} required>
+                    <option value="">Chọn học viên</option>
+                    {candidates.map(item => <option key={item.id} value={item.id} disabled={item.isLocked}>{item.fullName} · {item.studentCode ?? item.email}{item.isLocked ? " (đã khóa)" : ""}</option>)}
+                </select>
+                {students.data?.items.length === 0 && <p>Không tìm thấy học viên.</p>}
+                <div className="academic-fields">
+                    {([["maxAbsences", "Số buổi vắng tối đa"], ["maxLates", "Số lần đi muộn tối đa"], ["maxSkippedAssignments", "Số bài bỏ nộp tối đa"]] as const).map(([name, label]) =>
+                        <div className="academic-field" key={name}><label htmlFor={name}>{label}</label><input id={name} name={name} type="number" min={0} max={2147483647} step={1} required disabled={action.busy} /></div>)}
+                </div>
+                <button className="primary" disabled={action.busy || !canEnroll}>Ghi danh</button>
             </form>
+            {students.data && !action.busy && <Pager page={students.data.page} pageSize={students.data.pageSize} total={students.data.total}
+                change={page => { setStudentId(""); setSearch(previous => ({ ...previous, page })); }} label="Phân trang học viên" />}
             <ErrorMessage error={action.error} /><p role="status">{action.busy ? "Đang xử lý…" : notice}</p>
-            {items?.length === 0 && <p>Chưa có thành viên.</p>}
-            {items && <ul className="submission-list">{items.map(item => <li key={item.id}>
-                <span><code>{item.studentId}</code> · {item.isActive ? "Đang hoạt động" : "Đã thu hồi"}</span>
-                {item.isActive && <button className="secondary" disabled={action.busy} onClick={() => {
-                    if (!window.confirm(`Thu hồi quyền học tập của ${item.studentId}?`)) return;
-                    setNotice("");
-                    void action.run(signal => api<void>(`/enrollment/memberships/${item.id}`, { method: "DELETE", signal }), () => { setItems(previous => previous?.map(value => value.id === item.id ? { ...value, isActive: false } : value) ?? null); setNotice("Đã thu hồi quyền học tập."); });
-                }}>Thu hồi quyền</button>}
-            </li>)}</ul>}
-            {items?.length === 200 && <p>Đang hiển thị tối đa 200 thành viên.</p>}
         </section>
+        {validClass && <section className="panel"><h2>Thành viên lớp đã chọn</h2>
+            <ReadFeedback result={roster} />
+            {roster.data?.length === 0 && <p>Chưa có thành viên.</p>}
+            {!!roster.data?.length && <ul className="catalog-list">{roster.data.map(item => {
+                const name = candidates.find(student => student.id === item.studentId)?.fullName ?? item.studentId;
+                return <li key={item.id}>
+                <p>{name} · {item.status === "Cancelled" ? "Đã chuyển lớp" : item.isActive ? "Đang hoạt động" : "Đã thu hồi"}</p>
+                {item.status === "Active" && <div className="actions"><button className="secondary" disabled={action.busy} onClick={() => {
+                    if (!window.confirm(item.isActive ? "Thu hồi quyền học tập của học viên này?" : "Cấp lại quyền học tập cho học viên này?")) return;
+                    setNotice("");
+                    void action.run(signal => item.isActive ? api<unknown>(`/enrollment/memberships/${item.id}`, { method: "DELETE", signal })
+                        : api<unknown>("/enrollment/memberships", { method: "POST", body: JSON.stringify({ classId, studentId: item.studentId }), signal }), () => {
+                        roster.retry(); setNotice(item.isActive ? "Đã thu hồi quyền học tập." : "Đã cấp lại quyền học tập.");
+                    });
+                }}>{item.isActive ? "Thu hồi quyền" : "Cấp lại quyền"}</button>
+                <button className="secondary" aria-expanded={transferId === item.id} disabled={action.busy} onClick={() => {
+                    setTransferId(transferId === item.id ? "" : item.id); setTargetClassId(""); setNotice("");
+                }}>Chuyển lớp</button></div>}
+                {transferId === item.id && item.status === "Active" && <form className="academic-form" onSubmit={event => {
+                    event.preventDefault();
+                    if (action.busy || !isAcademicId(targetClassId) || targetClassId === classId) return;
+                    void action.run(signal => api<Enrollment>(`/enrollment/enrollments/${item.id}/transfer`, {
+                        method: "POST", body: JSON.stringify({ targetClassId }), signal,
+                    }), () => { setTransferId(""); setTargetClassId(""); setNotice("Đã chuyển lớp. Hóa đơn lớp cũ không thay đổi."); roster.retry(); });
+                }}>
+                    <fieldset className="session-skills" disabled={action.busy}>
+                        <legend>Chuyển lớp cho {name}</legend>
+                        <ClassSelect id="transfer-target" value={targetClassId} onChange={setTargetClassId} destinationOf={classId} />
+                        <p id="transfer-policy">Giữ nguyên hóa đơn lớp cũ, kể cả chưa thu. Không lập hóa đơn mới, bù trừ hay hoàn tiền. Giáo vụ đối soát thủ công.</p>
+                        <button className="primary" aria-describedby="transfer-policy" disabled={!targetClassId}>Xác nhận chuyển lớp</button>
+                    </fieldset>
+                </form>}
+            </li>; })}</ul>}
+            {roster.data?.length === 200 && <p>Đang hiển thị tối đa 200 thành viên.</p>}
+        </section>}
     </>;
 }

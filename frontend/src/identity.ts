@@ -26,6 +26,42 @@ export type CreatedAccount = Pick<Profile, "id" | "email" | "fullName" | "role">
 export type UpdateProfileRequest = Pick<Profile, "fullName" | "email" | "phone" | "avatarFileId"> & {
     expectedRevision: string;
 };
+export type ManagedAccount = Pick<Profile, "id" | "fullName" | "email" | "phone" | "studentCode" | "revision"> & { isLocked: boolean };
+export type ManagedAccountDirectory = "students" | "staff";
+export type StaffProvisionRequest = Omit<CreateAccountRequest, "role">;
+export type StudentContactRequest = Pick<UpdateProfileRequest, "fullName" | "email" | "phone" | "expectedRevision">;
+type ManagedAccountPage = { items: ManagedAccount[]; total: number; page: number; pageSize: number };
+const directoryPath = (directory: ManagedAccountDirectory) => `/identity/users/${directory}`;
+
+export function listManagedAccounts(directory: ManagedAccountDirectory, search: { q: string; page: number }, signal?: AbortSignal) {
+    const query = new URLSearchParams({ q: search.q, page: String(search.page) });
+    return api<ManagedAccountPage>(`${directoryPath(directory)}?${query}`, { signal });
+}
+const studentPath = (id: string) => `${directoryPath("students")}/${encodeURIComponent(id)}`;
+export const getManagedStudent = (id: string, signal?: AbortSignal) => api<ManagedAccount>(studentPath(id), { signal });
+export const updateManagedStudent = (id: string, request: StudentContactRequest, signal?: AbortSignal) =>
+    api<ManagedAccount>(studentPath(id), { method: "PUT", body: JSON.stringify(request), signal });
+export const provisionStaff = (request: StaffProvisionRequest, signal?: AbortSignal) =>
+    api<CreatedAccount>(directoryPath("staff"), { method: "POST", body: JSON.stringify(request), signal });
+export const setManagedAccountLock = (directory: ManagedAccountDirectory, id: string, isLocked: boolean, expectedRevision: string, signal?: AbortSignal) =>
+    api<ManagedAccount>(`${directoryPath(directory)}/${encodeURIComponent(id)}/lock`, {
+        method: "PUT", body: JSON.stringify({ isLocked, expectedRevision }), signal,
+    });
+
+export const vietnamMobileHint = "Ví dụ: 090 123 4567 hoặc +84 90 123 4567.";
+
+export function normalizeVietnamMobile(input: string | null | undefined, previous?: string | null): string | null {
+    const value = input?.trim();
+    if (!value) return null;
+    if (value === previous) return previous;
+    const number = value.length <= 32 && /^(?:0|\+84)(?:[ .-]*[0-9]){9}$/.test(value)
+        ? value.replace(/[ .-]/g, "").replace(/^(?:0|\+84)/, "") : "";
+    if (!/^(?:3[2-9]|5[25689]|7[06789]|8[1-9]|9[0-9])[0-9]{7}$/.test(number)) {
+        const message = `Nhập số di động Việt Nam hợp lệ. ${vietnamMobileHint}`;
+        throw new ApiError(400, message, { Phone: [message] });
+    }
+    return `+84${number}`;
+}
 
 export const canCreateAccounts = (role: Role) => role === "Admin" || role === "Staff";
 export const createAccount = (request: CreateAccountRequest, signal?: AbortSignal) =>

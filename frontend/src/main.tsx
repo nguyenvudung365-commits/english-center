@@ -5,7 +5,10 @@ import React, {
     useSyncExternalStore,
 } from "react";
 import { createRoot } from "react-dom/client";
-import { zaloSupportUrl } from "./support-contact";
+import { Collapse, ConfigProvider } from "antd";
+import viVN from "antd/locale/vi_VN";
+import { LoginSupport } from "./login-support";
+import { ReminderPanel } from "./reminder-panel";
 import {
     BrowserRouter,
     Navigate,
@@ -40,6 +43,7 @@ import {
 import {
     api,
     getAuthState,
+    type AuthState,
     getSession,
     getSessionGeneration,
     identity,
@@ -61,6 +65,8 @@ import { ErrorMessage, PageHeading, Unavailable } from "./ui";
 import { Assignments, AssignmentDetails, Enrollments } from "./assignment-pages";
 import { PracticeDetails, PracticePage } from "./practice-pages";
 import { AccountCreate, ProfilePanel, TeacherAdministration } from "./identity-pages";
+import { StaffAdministration, StudentAdministration } from "./student-administration";
+import { ClassMaterials } from "./materials-pages";
 import { Schedule, SessionDetails } from "./schedule-pages";
 import { AttendancePage } from "./attendance-pages";
 import { ProgressPage, StatisticsPage } from "./statistics-pages";
@@ -78,9 +84,6 @@ const labels = {
     Teacher: "Giáo viên",
     Student: "Học viên",
 };
-const supportUrl = zaloSupportUrl(import.meta.env.VITE_SUPPORT_ZALO_URL);
-const supportOpensZaloApp = supportUrl?.startsWith("https://zaloapp.com/");
-
 function Login({ notice }: { notice: string }) {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -127,7 +130,7 @@ function Login({ notice }: { notice: string }) {
                 </div>
                 <small>English Center · Hệ thống quản lý trung tâm</small>
             </section>
-            <section className="login-form">
+            <section className="login-form login-with-support">
                 <div className="form-wrap">
                     <span className="eyebrow">CHÀO MỪNG TRỞ LẠI</span>
                     <h2 id="login-heading" tabIndex={-1}>
@@ -189,31 +192,28 @@ function Login({ notice }: { notice: string }) {
                     </form>
                     <p className="help">
                         <LockKeyhole size={16} aria-hidden="true" />
-                        <span>Quên mật khẩu? {supportUrl ? (
-                            <>
-                                <a href={supportUrl} target="_blank" rel="noopener noreferrer">
-                                    {supportOpensZaloApp ? "Liên hệ giáo vụ (mở ứng dụng Zalo, tab mới)" : "Liên hệ giáo vụ qua Zalo (mở tab mới)"}
-                                </a>
-                                {supportOpensZaloApp && " Nên mở trên điện thoại có Zalo; trên máy tính có thể chỉ hiện trang chủ Zalo."}
-                            </>
-                        ) : "Liên hệ giáo vụ để được hỗ trợ."}</span>
+                        <span>Quên mật khẩu? Dùng nút hỗ trợ để liên hệ giáo vụ.</span>
                     </p>
                 </div>
+                <LoginSupport />
             </section>
         </main>
     );
 }
-function Restoring({ state }: { state: "restoring" | "unavailable" | "logout-pending" }) {
+function Restoring({ state }: { state: Exclude<AuthState, "ready"> }) {
     const pendingLogout = state === "logout-pending";
+    const rateLimited = state === "rate-limited";
     return (
         <main className="login">
             <section className="login-form">
                 <div className="form-wrap">
-                    <h2 role="status">{pendingLogout ? "Chưa xác nhận đăng xuất" : state === "unavailable" ? "Chưa thể khôi phục phiên" : "Đang khôi phục phiên đăng nhập…"}</h2>
+                    <h2 role="status">{pendingLogout ? "Chưa xác nhận đăng xuất" : state === "restoring" ? "Đang khôi phục phiên đăng nhập…" : "Chưa thể khôi phục phiên"}</h2>
                     {state !== "restoring" && (
                         <>
                             <p className="muted">
-                                {pendingLogout ? "Phiên sẽ không được mở lại. Thử lại để hoàn tất đăng xuất trên máy chủ." : "Không kết nối được máy chủ. Phiên của bạn chưa bị đăng xuất."}
+                                {pendingLogout ? "Phiên sẽ không được mở lại. Thử lại để hoàn tất đăng xuất trên máy chủ."
+                                    : rateLimited ? "Bạn vừa tải lại trang quá nhiều lần. Hãy đợi một lúc rồi thử lại; bạn chưa bị đăng xuất."
+                                    : "Không kết nối được máy chủ. Phiên của bạn chưa bị đăng xuất."}
                             </p>
                             <button className="primary" onClick={() => void restoreSession()}>
                                 Thử lại
@@ -242,10 +242,11 @@ function Overview() {
                     </NavLink>
                 </div>
                 <div className="welcome-art" aria-hidden="true">
-                    <BookOpen size={88} strokeWidth={1} />
+                    <img src="/study-desk.svg" width="210" height="133" alt="" />
                     <span>LEARN. CONNECT. GROW.</span>
                 </div>
             </div>
+            {(user.role === "Student" || user.role === "Teacher") && <ReminderPanel student={user.role === "Student"} />}
             <div className="section-heading">
                 <h2>Không gian của bạn</h2>
                 <span className="pill">{labels[user.role]}</span>
@@ -420,10 +421,12 @@ function navigation(role: import("./api").Role) {
                   { to: "/courses", label: "Khóa học", icon: BookOpen },
                   { to: "/teachers", label: "Giáo viên", icon: UserRound },
                   { to: "/users/new", label: "Tạo tài khoản", icon: ShieldCheck },
+                  { to: "/students", label: "Quản lý học viên", icon: UserRound },
               ]
             : []),
         ...(role === "Admin"
             ? [{ to: "/users/teachers", label: "Quản trị giáo viên", icon: ShieldCheck },
+               { to: "/users/staff", label: "Quản trị giáo vụ", icon: ShieldCheck },
                { to: "/faq/manage", label: "Quản trị FAQ", icon: CircleHelp }]
             : []),
         ...(manager || role === "Student"
@@ -447,6 +450,7 @@ function navigation(role: import("./api").Role) {
               ]
             : []),
         { to: "/attendance", label: role === "Student" ? "Điểm danh của tôi" : "Điểm danh", icon: Check },
+        { to: "/materials", label: "Tài liệu lớp", icon: BookOpen },
         { to: "/assignments", label: "Bài tập", icon: BookOpen },
         { to: "/practice", label: "Luyện tập", icon: NotebookPen },
     ];
@@ -457,6 +461,27 @@ function navigation(role: import("./api").Role) {
     ]
         .filter((link) => link.to !== "/statistics" || role === "Student")
         .filter((link) => role !== "Teacher" || !hiddenFromTeacher.includes(link.to));
+}
+const navigationGroups = [
+    { key: "learning", label: "Dạy và học", paths: ["/classes", "/schedule", "/attendance", "/materials", "/assignments", "/practice", "/progress"] },
+    { key: "operations", label: "Giáo vụ và học phí", paths: ["/students", "/placement-tests", "/enrollment", "/invoices", "/warnings", "/statistics", "/courses", "/teachers", "/users/new"] },
+    { key: "services", label: "Thông báo và hỗ trợ", paths: ["/notifications", "/feedback", "/faq", "/account"] },
+    { key: "admin", label: "Quản trị hệ thống", paths: ["/users/teachers", "/users/staff", "/faq/manage"] },
+];
+const navigationTheme = { token: { colorPrimary: "#075985", colorText: "#1e293b", borderRadius: 8 } };
+function WorkspaceLinks({ links }: { links: ReturnType<typeof navigation> }) {
+    const [expanded, setExpanded] = useState(navigationGroups.map(group => group.key));
+    const renderLink = (link: (typeof links)[number]) => <NavLink end={link.to === "/" || link.to === "/faq"} key={link.to} to={link.to}>
+        <link.icon size={19} aria-hidden="true" />{link.label}
+    </NavLink>;
+    const groups = navigationGroups.flatMap(group => {
+        const children = group.paths.flatMap(path => links.filter(link => link.to === path).map(renderLink));
+        return children.length ? [{ key: group.key, label: group.label, children: <div inert={!expanded.includes(group.key)}>{children}</div> }] : [];
+    });
+    return <ConfigProvider theme={navigationTheme} locale={viVN}>
+        {links.filter(link => link.to === "/").map(renderLink)}
+        <Collapse className="workspace-groups" ghost size="small" activeKey={expanded} onChange={setExpanded} items={groups} />
+    </ConfigProvider>;
 }
 function App() {
     const session = useSyncExternalStore(subscribe, getSession);
@@ -667,16 +692,7 @@ function App() {
                         }
                     }}
                 >
-                    {links.map((link) => (
-                        <NavLink
-                            end={link.to === "/" || link.to === "/faq"}
-                            key={link.to}
-                            to={link.to}
-                        >
-                            <link.icon size={19} />
-                            {link.label}
-                        </NavLink>
-                    ))}
+                    <WorkspaceLinks key={user.role} links={links} />
                 </nav>
                 <div className="sidebar-bottom">
                     <span className="avatar">
@@ -756,6 +772,8 @@ function App() {
                         />
                         <Route path="/users/new" element={<AccountCreate />} />
                         <Route path="/users/teachers" element={user.role === "Admin" ? <TeacherAdministration /> : <Navigate to="/" replace />} />
+                        <Route path="/users/staff" element={<StaffAdministration />} />
+                        <Route path="/students" element={<StudentAdministration />} />
                         <Route path="/classes" element={<Classes />} />
                         <Route
                             path="/classes/new"
@@ -799,6 +817,7 @@ function App() {
                             }
                         />
                         <Route path="/assignments" element={<Assignments />} />
+                        <Route path="/materials" element={<ClassMaterials />} />
                         <Route path="/assignments/:id" element={<AssignmentDetails />} />
                         <Route path="/practice" element={<PracticePage />} />
                         <Route path="/practice/:id" element={<PracticeDetails />} />

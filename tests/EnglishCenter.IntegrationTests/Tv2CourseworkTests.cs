@@ -882,6 +882,7 @@ public sealed class Tv2CourseworkTests : IAsyncLifetime
     private sealed class AlwaysActive : IEnrollmentAccess
     {
         public Task<bool> IsActiveAsync(Guid classId, Guid studentId, CancellationToken ct) => Task.FromResult(true);
+        public Task<IReadOnlyList<Guid>> TransferredClassIdsAsync(Guid studentId, CancellationToken ct) => Task.FromResult<IReadOnlyList<Guid>>([]);
     }
 
     private sealed class CourseworkFactory : WebApplicationFactory<Program>,

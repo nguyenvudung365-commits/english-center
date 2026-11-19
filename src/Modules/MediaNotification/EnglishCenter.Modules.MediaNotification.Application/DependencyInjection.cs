@@ -17,6 +17,7 @@ public static class DependencyInjection
     {
         services.AddScoped<EnglishCenter.Modules.MediaNotification.Contracts.ISubmissionFileAccess, Files.SubmissionFileAccess>();
         services.AddScoped<EnglishCenter.Modules.MediaNotification.Contracts.IAvatarFileAccess, Files.AvatarFileAccess>();
+        services.AddScoped<EnglishCenter.Modules.MediaNotification.Contracts.IClassFileAccess, Files.ClassFileAccess>();
         services.AddScoped<Files.FileService>();
         services.AddScoped<MediaAccess>();
         services.AddScoped<NotificationService>();

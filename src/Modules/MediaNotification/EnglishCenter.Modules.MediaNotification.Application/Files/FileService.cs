@@ -22,13 +22,16 @@ public sealed class FileService(IFileStore store, IObjectStorage storage, ICurre
         if (request is null || string.IsNullOrWhiteSpace(request.FileName) || request.FileName.Length > 255 ||
             request.FileName.Any(c => char.IsControl(c) || c is '/' or '\\' or ':' or '"' or '<' or '>' or '|' or '?' or '*') ||
             request.FileName != request.FileName.Trim() || request.SizeBytes is not (> 0 and <= MaxSizeBytes) ||
-            request.Purpose is not ("submission" or "avatar") ||
+            request.Purpose is not ("submission" or "avatar" or "material" or "exam") ||
             (request.Purpose == "avatar" && !AvatarPolicy.IsValid(request.FileName, request.ContentType, request.SizeBytes.Value)) ||
+            // Đề thi là một PDF duy nhất để học viên tải về.
+            (request.Purpose == "exam" && !string.Equals(Path.GetExtension(request.FileName), ".pdf", StringComparison.OrdinalIgnoreCase)) ||
             !ContentTypes.TryGetValue(Path.GetExtension(request.FileName), out var canonicalType) ||
             !string.Equals(canonicalType, request.ContentType, StringComparison.OrdinalIgnoreCase))
-            throw new FileFailure(400, "Invalid filename, content type, purpose or size (submission: 20 MiB; avatar: JPG/PNG, 2 MiB).");
+            throw new FileFailure(400, "Invalid filename, content type, purpose or size (submission/material: 20 MiB; exam: PDF; avatar: JPG/PNG, 2 MiB).");
 
-        if (request.Purpose == "avatar") await RequireActiveAvatarOwnerAsync(owner, ct);
+        if (request.Purpose == "avatar") await RequireActiveOwnerAsync(owner, ct);
+        else if (IsClassFilePurpose(request.Purpose)) await RequireClassFileOwnerAsync(owner, ct);
 
         var now = timeProvider.GetUtcNow();
         var file = StoredFile.Create(owner, request.FileName, canonicalType, request.SizeBytes.Value,
@@ -46,10 +49,11 @@ public sealed class FileService(IFileStore store, IObjectStorage storage, ICurre
         var file = await FindAsync(fileId, owner, ct);
         if (file.Purpose == "avatar")
         {
-            await RequireActiveAvatarOwnerAsync(owner, ct);
+            await RequireActiveOwnerAsync(owner, ct);
             if (!AvatarPolicy.IsValid(file.FileName, file.ContentType, file.SizeBytes))
                 throw new FileFailure(400, "Invalid avatar type or size.");
         }
+        else if (IsClassFilePurpose(file.Purpose)) await RequireClassFileOwnerAsync(owner, ct);
         if (file.UploadedAt is not null) return Response(file);
         CheckExpiry(file);
         var staged = await storage.HeadAsync(file.StagingKey, ct)
@@ -90,7 +94,8 @@ public sealed class FileService(IFileStore store, IObjectStorage storage, ICurre
     public async Task<DownloadTicket> PresignDownloadAsync(Guid fileId, CancellationToken ct = default)
     {
         var file = await FindAsync(fileId, Owner(), ct);
-        if (file.Purpose == "avatar") await RequireActiveAvatarOwnerAsync(file.OwnerId, ct);
+        if (file.Purpose == "avatar") await RequireActiveOwnerAsync(file.OwnerId, ct);
+        else if (IsClassFilePurpose(file.Purpose)) await RequireClassFileOwnerAsync(file.OwnerId, ct);
         if (file.UploadedAt is null || file.FileKey is null) throw new FileFailure(409, "File has not been confirmed.");
         var expiry = timeProvider.GetUtcNow().Add(TicketLifetime);
         var url = await storage.PresignGetAsync(file.FileKey, file.FileName, expiry, ct);
@@ -100,10 +105,20 @@ public sealed class FileService(IFileStore store, IObjectStorage storage, ICurre
     private Guid Owner() => currentUser.IsAuthenticated && currentUser.UserId is { } id && id != Guid.Empty
         ? id : throw new FileFailure(401, "A valid authenticated subject is required.");
 
-    private async Task RequireActiveAvatarOwnerAsync(Guid owner, CancellationToken ct)
+    private async Task RequireActiveOwnerAsync(Guid owner, CancellationToken ct)
     {
         if (accounts is null || !await accounts.IsActiveInRoleAsync(owner, currentUser.Role, ct))
             throw new FileFailure(403, "An active account with the current role is required.");
+    }
+
+    // Tài liệu/đề thi lớp: chỉ giáo viên, giáo vụ, quản trị viên còn hoạt động mới được tải lên hoặc lấy lại link của chính mình.
+    public static bool IsClassFilePurpose(string purpose) => purpose is "material" or "exam";
+
+    private async Task RequireClassFileOwnerAsync(Guid owner, CancellationToken ct)
+    {
+        if (currentUser.Role is not (Roles.Teacher or Roles.Admin or Roles.Staff))
+            throw new FileFailure(403, "Only teachers and staff upload class files.");
+        await RequireActiveOwnerAsync(owner, ct);
     }
 
     private async Task<StoredFile> FindAsync(Guid fileId, Guid owner, CancellationToken ct) =>

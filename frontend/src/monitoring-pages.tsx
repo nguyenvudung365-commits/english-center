@@ -87,7 +87,7 @@ function PlacementWorkspace({ manager }: { manager: boolean }) {
     const data = result.data;
     const creating = editing === null;
     const errors = validatePlacementDraft(draft, creating);
-    const serverFields = save.error instanceof ApiError && save.error.status === 400 ? placementServerErrors(save.error.message) : {};
+    const serverFields = save.error instanceof ApiError && save.error.status === 400 ? placementServerErrors(save.error.serverTitle ?? "") : {};
     const shown: Record<string, string[] | undefined> = { ...(attempted ? errors : {}), ...serverFields };
     const set = (patch: Partial<PlacementDraft>) => setDraft((previous) => ({ ...previous, ...patch }));
     const reset = () => { setDraft(emptyPlacementDraft); setEditing(null); setAttempted(false); };

@@ -1,25 +1,20 @@
 #!/usr/bin/env python3
 """Repeatable rich demo seed for an ISOLATED, loopback-only local stack.
 
-Stdlib only. Everything goes through the public HTTP API, except Staff accounts, which no API can create:
-those are inserted into the demo stack's OWN Postgres (compose project `english-center-demo`) only.
+Stdlib only. Seed data is created through the local HTTP API and object storage.
 Never prints passwords, tokens or signed URLs. Run `python scripts/demo/seed_demo.py --help`.
 """
 
 import argparse
-import base64
-import hashlib
 import http.client
 import json
 import os
 import random
 import secrets
-import struct
 import subprocess
 import sys
 import time
 import unicodedata
-import uuid
 from datetime import date, datetime, time as dtime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlencode, urlparse
@@ -30,9 +25,9 @@ STATE_FILE = ROOT / ".env.demo-seed.json"  # id cache only, same ignore rule
 PROJECT = "english-center-demo"
 MARKER = "english-center-demo"
 VN = timezone(timedelta(hours=7))
-MAIL = "demo.english-center.invalid"
+MAIL = "lms.english-center.invalid"
 PHASES = ["accounts", "classes", "sessions", "enrollment", "finance", "placement", "attendance",
-          "practice", "coursework", "feed", "feedback", "faq", "notifications"]
+          "practice", "coursework", "feed", "feedback", "faq", "notifications", "worksheets"]
 LOGIN_GAP = 3.2  # identity-auth limiter is 20 requests/minute/IP
 
 
@@ -66,25 +61,25 @@ SKILL_ROTATION = [["Listening"], ["Reading"], ["Writing"], ["Speaking"], ["Liste
 
 # first student = 5*k (mod 42); `n` consecutive students; revoke = last member loses class access.
 CLASSES = [
-    dict(code="DEMO-FND-A1", name="IELTS Foundation A1 - Tối 2-4-6", course="IELTS-FOUNDATION", type="Main",
+    dict(code="FND-A1", name="IELTS Foundation A1 - Tối 2-4-6", course="IELTS-FOUNDATION", type="Main",
          start=-21, end=42, teacher=1, at=(18, 0), max=12, fee=4200000, n=9),
-    dict(code="DEMO-FND-A2", name="IELTS Foundation A2 - Sáng cuối tuần", course="IELTS-FOUNDATION", type="Main",
+    dict(code="FND-A2", name="IELTS Foundation A2 - Sáng cuối tuần", course="IELTS-FOUNDATION", type="Main",
          start=-14, end=49, teacher=2, at=(8, 0), max=12, fee=4200000, n=9, revoke_last=True),
-    dict(code="DEMO-FND-S1", name="Foundation phụ đạo Listening - Reading", course="IELTS-FOUNDATION",
+    dict(code="FND-S1", name="Foundation phụ đạo Listening - Reading", course="IELTS-FOUNDATION",
          type="Supplementary", start=-7, end=28, teacher=3, at=(19, 30), max=10, fee=1200000, n=7),
-    dict(code="DEMO-INT-B1", name="IELTS Intermediate B1 - Tối thường ngày", course="IELTS-INTERMEDIATE", type="Main",
+    dict(code="INT-B1", name="IELTS Intermediate B1 - Tối thường ngày", course="IELTS-INTERMEDIATE", type="Main",
          start=-28, end=35, teacher=4, at=(18, 30), max=12, fee=6800000, n=9, revoke_last=True),
-    dict(code="DEMO-INT-B2", name="IELTS Intermediate B2 - Lớp đã đầy", course="IELTS-INTERMEDIATE", type="Main",
+    dict(code="INT-B2", name="IELTS Intermediate B2 - Lớp đã đầy", course="IELTS-INTERMEDIATE", type="Main",
          start=-10, end=50, teacher=5, at=(9, 0), max=8, fee=6800000, n=8),
-    dict(code="DEMO-INT-S1", name="Intermediate Writing Clinic", course="IELTS-INTERMEDIATE",
+    dict(code="INT-S1", name="Intermediate Writing Clinic", course="IELTS-INTERMEDIATE",
          type="Supplementary", start=-5, end=30, teacher=6, at=(20, 0), max=10, fee=1800000, n=7),
-    dict(code="DEMO-ADV-C1", name="IELTS Advanced C1 - Mục tiêu 6.5+", course="IELTS-ADVANCED", type="Main",
+    dict(code="ADV-C1", name="IELTS Advanced C1 - Mục tiêu 6.5+", course="IELTS-ADVANCED", type="Main",
          start=-30, end=30, teacher=7, at=(18, 0), max=10, fee=9500000, n=8),
-    dict(code="DEMO-ADV-C2", name="IELTS Advanced C2 - Khai giảng tuần sau", course="IELTS-ADVANCED", type="Main",
+    dict(code="ADV-C2", name="IELTS Advanced C2 - Khai giảng tuần sau", course="IELTS-ADVANCED", type="Main",
          start=7, end=84, teacher=8, at=(19, 0), max=12, fee=9500000, n=5),
-    dict(code="DEMO-FND-N1", name="IELTS Foundation N1 - Khai giảng sau 2 tuần", course="IELTS-FOUNDATION",
+    dict(code="FND-N1", name="IELTS Foundation N1 - Khai giảng sau 2 tuần", course="IELTS-FOUNDATION",
          type="Main", start=14, end=84, teacher=9, at=(8, 30), max=12, fee=4200000, n=5),
-    dict(code="DEMO-INT-F0", name="Intermediate K-1 (đã kết thúc)", course="IELTS-INTERMEDIATE", type="Main",
+    dict(code="INT-F0", name="Intermediate K-1 (đã kết thúc)", course="IELTS-INTERMEDIATE", type="Main",
          start=-75, end=-8, teacher=10, at=(18, 0), max=10, fee=6800000, n=0),
 ]
 for _k, _c in enumerate(CLASSES):
@@ -224,6 +219,7 @@ def session_plan(cls, start, end, today, now):
 
 def ascii_text(text):
     text = text.replace("Đ", "D").replace("đ", "d")
+    text = text.replace("–", "-").replace("—", "-").replace("·", "|")
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
 
 
@@ -247,20 +243,6 @@ def make_pdf(title, lines):
         out += f"{offset:010d} 00000 n \n".encode()
     out += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
     return bytes(out)
-
-
-def aspnet_hash(password, iterations=100_000):
-    """ASP.NET Core Identity V3 hash (PBKDF2-HMAC-SHA512); PasswordHasher verifies from the embedded header."""
-    salt = os.urandom(16)
-    key = hashlib.pbkdf2_hmac("sha512", password.encode(), salt, iterations, 32)
-    return base64.b64encode(b"\x01" + struct.pack(">III", 2, iterations, len(salt)) + salt + key).decode()
-
-
-def aspnet_verify(encoded, password):
-    raw = base64.b64decode(encoded)
-    prf, iterations, salt_len = struct.unpack(">III", raw[1:13])
-    salt, key = raw[13:13 + salt_len], raw[13 + salt_len:]
-    return raw[0] == 1 and prf == 2 and hashlib.pbkdf2_hmac("sha512", password.encode(), salt, iterations, len(key)) == key
 
 
 def is_loopback(url):
@@ -298,7 +280,7 @@ def env_lines():
         "MEDIA_STORAGE_BUCKET=english-center-demo-media", "MEDIA_STORAGE_REGION=us-east-1",
         "MEDIA_STORAGE_PUBLIC_ENDPOINT=http://localhost:19000",
         "MEDIA_STORAGE_CORS_ORIGINS=http://localhost:18088,http://127.0.0.1:18088",
-        f"BOOTSTRAP_ADMIN_EMAIL=admin@{MAIL}", "BOOTSTRAP_ADMIN_NAME=Demo Administrator",
+        f"BOOTSTRAP_ADMIN_EMAIL=admin@{MAIL}", "BOOTSTRAP_ADMIN_NAME=LMS Administrator",
         f"BOOTSTRAP_ADMIN_PASSWORD={secrets.token_urlsafe(14)}",
         f"DEMO_ACTOR_PASSWORD={secrets.token_urlsafe(12)}",
         "API_PORT=18080", "WEB_PORT=18088", "MINIO_PORT=19000", "MINIO_CONSOLE_PORT=19001",
@@ -328,7 +310,7 @@ def compose(*args, web=True, capture=False, stdin=None):
     env = {key: value for key, value in os.environ.items() if key.upper() not in demo_keys}
     env["IMAGE_TAG"] = "demo-local"
     try:
-        return subprocess.run(command, cwd=ROOT, input=stdin, text=True, capture_output=capture, check=False, env=env)
+        return subprocess.run(command, cwd=ROOT, input=stdin, encoding="utf-8", capture_output=capture, check=False, env=env)
     except FileNotFoundError:
         raise Stop("Docker CLI not found.")
 
@@ -534,7 +516,7 @@ class Seeder:
 
     def classes(self, refresh=False):
         if self._classes is None or refresh:
-            query = urlencode(dict(search="DEMO-", page=1, pageSize=100))
+            query = urlencode(dict(page=1, pageSize=100))
             data = self.api.call(self.manager(), "GET", f"/api/academic/classes?{query}").data
             if data["total"] > len(data["items"]):
                 raise Stop("Too many demo-like classes to inspect safely.")
@@ -594,24 +576,13 @@ class Seeder:
         self.log(f"accounts: staff={len(STAFF)} teachers={len(TEACHERS)} students={N_STUDENTS}")
 
     def provision_staff(self, actors):
-        require_docker()
-        rows = []
         for actor in actors:
             n = int(actor.email.split("@")[0][5:])
-            email = actor.email.replace("'", "''")
-            rows.append(
-                f"INSERT INTO identity.users (\"Id\",\"Email\",\"NormalizedEmail\",\"FullName\",\"Phone\",\"AvatarFileId\","
-                f"\"StudentCode\",\"ProfileVersion\",\"Role\",\"PasswordHash\",\"IsLocked\",\"Revision\",\"CreatedAt\") "
-                f"VALUES ('{uuid.uuid4()}','{email}','{email.upper()}','{STAFF[n - 1]}','0901{n:06d}',NULL,NULL,0,'Staff',"
-                f"'{aspnet_hash(self.env['DEMO_ACTOR_PASSWORD'])}',false,'{uuid.uuid4()}',now()) "
-                f"ON CONFLICT (\"NormalizedEmail\") DO NOTHING;")
-        done = compose("exec", "-T", "postgres", "psql", "-U", "english_center", "-d", "english_center",
-                       "-X", "-q", "-v", "ON_ERROR_STOP=1", "-f", "-", stdin="\n".join(rows) + "\n", capture=True,
-                       web=False)
-        if done.returncode != 0:
-            raise Stop("Could not provision Staff in the demo Postgres (is the demo stack up?).")
-        self.count("staff_provisioned", len(actors))
-        for actor in actors:
+            reply = self.api.call(self.admin, "POST", "/api/identity/users/staff", dict(
+                email=actor.email, fullName=STAFF[n - 1], password=self.env["DEMO_ACTOR_PASSWORD"],
+                phone=f"0901{n:06d}"), soft=(409,))
+            if reply.status == 201:
+                self.count("staff_provisioned")
             self.api.login(actor)
 
     def phase_classes(self):
@@ -697,7 +668,7 @@ class Seeder:
     def phase_placement(self):
         for i, seq, offset, mode, status in PLACEMENTS:
             sid = self.student_id(i)
-            name = f"Kiểm tra đầu vào IELTS DEMO-{i:02d}-{seq}"
+            name = f"Kiểm tra đầu vào IELTS {i:02d}-{seq}"
             listing = self.api.call(self.manager(), "GET", f"/api/enrollment/placement-tests?studentId={sid}&page=1&pageSize=100").data
             if any(t["testName"] == name for t in listing["items"]):
                 continue
@@ -774,12 +745,12 @@ class Seeder:
         self.log(f"practice: created={self.stats.get('practice_created', 0)}")
 
     # --- coursework
-    def upload_pdf(self, student, name, lines):
+    def upload_pdf(self, actor, name, lines, purpose="submission"):
         data = make_pdf(name, lines)
-        ticket = self.api.call(student, "POST", "/api/media-notification/files/presign", dict(
-            fileName=f"{name}.pdf", contentType="application/pdf", sizeBytes=len(data), purpose="submission")).data
+        ticket = self.api.call(actor, "POST", "/api/media-notification/files/presign", dict(
+            fileName=f"{name}.pdf", contentType="application/pdf", sizeBytes=len(data), purpose=purpose)).data
         self.api.upload(ticket["url"], ticket["requiredHeaders"], data)
-        self.api.call(student, "POST", f"/api/media-notification/files/{ticket['fileId']}/confirm")
+        self.api.call(actor, "POST", f"/api/media-notification/files/{ticket['fileId']}/confirm")
         return ticket["fileId"]
 
     def pick_session(self, sessions, which):
@@ -794,6 +765,37 @@ class Seeder:
             return live[-1]["id"] if live else None
         pool = upcoming or ordered
         return pool[min(0 if which == "next" else 2, len(pool) - 1)]["id"]
+
+    def phase_worksheets(self):
+        from textwrap import wrap
+        from worksheets import WORKSHEETS
+
+        for cls in CLASSES:
+            if not cls["n"]:
+                continue
+            item, teacher = self.klass(cls), self.teacher_actor(cls)
+            session = self.pick_session(self.class_sessions(cls), "next")
+            if session is None:
+                raise Stop(f"No worksheet session for {cls['code']}.")
+            classes = (0, 1, 2, 7) if cls["course"] == "IELTS-FOUNDATION" else (
+                (2, 3, 4, 5) if cls["course"] == "IELTS-INTERMEDIATE" else (3, 4, 5, 6))
+            existing = self.api.call(teacher, "GET", f"/api/academic/assignments?classId={item['id']}").data
+            known = {a["title"] for a in existing}
+            for index in classes:
+                key, title, content = WORKSHEETS[index]
+                if title in known:
+                    continue
+                lines = [line for paragraph in content.splitlines() for line in (wrap(paragraph, width=78) or [""])]
+                if len(lines) > 33:
+                    raise Stop(f"Worksheet won't fit one PDF page: {key}")
+                prompt = self.upload_pdf(teacher, key, lines, "material")
+                opens = max(self.now - timedelta(minutes=5), at(date.fromisoformat(item["startDate"]), 0))
+                self.api.call(teacher, "POST", "/api/academic/assignments", dict(
+                    classId=item["id"], title=title, description=content, kind="Homework", sessionId=session,
+                    opensAtUtc=iso(opens), closesAtUtc=iso(max(opens, self.now) + timedelta(days=28)),
+                    publish=True, promptFileId=prompt))
+                self.count("worksheets_created")
+        self.log(f"worksheets: created={self.stats.get('worksheets_created', 0)}")
 
     def phase_coursework(self):
         day = self.today
@@ -818,6 +820,15 @@ class Seeder:
             ]
             if cls["start"] > 0:  # not started yet: only an upcoming and a draft assignment make sense
                 plans = plans[3:]
+            else:
+                plans.append(dict(title=f"[{code}] Đề thi PDF: {topics[0]}", kind="Exam", session="next", publish=True,
+                                  opens=self.now - timedelta(hours=1), closes=self.now + timedelta(hours=36), submit=0.55, grade=0.65))
+            material_title = f"[{code}] Tài liệu lớp: {topics[0]}"
+            materials = self.api.call(teacher, "GET", f"/api/academic/materials?classId={item['id']}").data
+            if not any(m["title"] == material_title for m in materials):
+                file_id = self.upload_pdf(teacher, f"tai-lieu-{code.lower()}", [topics[0], "Review the vocabulary and write five sentences."], "material")
+                self.api.call(teacher, "POST", "/api/academic/materials", dict(classId=item["id"], title=material_title, fileId=file_id))
+                self.count("materials_created")
             existing = {a["title"]: a for a in self.api.call(self.manager(), "GET", f"/api/academic/assignments?classId={item['id']}").data}
             roster = self.active_members(cls)
             for plan in plans:
@@ -830,6 +841,9 @@ class Seeder:
                                 description=f"Hoàn thành bài về {topics[0].split(':')[0]} và nộp file PDF.",
                                 opensAtUtc=iso(plan["opens"]), closesAtUtc=iso(plan["closes"]), kind=plan["kind"],
                                 sessionId=session, publish=plan["publish"])
+                    if plan["kind"] == "Exam":
+                        body["promptFileId"] = self.upload_pdf(teacher, f"de-thi-{code.lower()}",
+                                                              ["Write a short paragraph and give two examples."], "exam")
                     found = self.api.call(teacher, "POST", "/api/academic/assignments", body).data
                     self.count("assignments_created")
                 if plan["submit"] and found["status"] == "Open":
@@ -968,7 +982,7 @@ class Seeder:
         self.log(f"  logins: {self.api.logins}")
         gaps = list(self.gaps) + [
             "Finished class has no students: enrollment is blocked after a class ends, so completed-class stats stay 0.",
-            "Staff accounts are inserted into the demo Postgres (no API creates Staff); avatars are not seeded."]
+            "Avatars are not seeded."]
         self.log("--- honest gaps ---")
         for text in dict.fromkeys(gaps):
             self.log(f"  - {text}")
@@ -997,14 +1011,18 @@ def verify(env, base):
     check("invoices", inv["total"] > 0 and 0 < paid < len(inv["items"]), f"total={inv['total']} paid(first page)={paid}")
     pt = api.call(seeder.manager(), "GET", "/api/enrollment/placement-tests?page=1&pageSize=100").data
     check("placement", {t["status"] for t in pt["items"]} >= {"Pending", "Done", "Cancelled"}, f"total={pt['total']}")
-    statuses, graded = set(), 0
+    statuses, graded, exams, materials = set(), 0, 0, 0
     for cls in CLASSES:
-        for a in api.call(seeder.manager(), "GET", f"/api/academic/assignments?classId={seeder.klass(cls)['id']}").data:
+        class_id = seeder.klass(cls)["id"]
+        materials += len(api.call(seeder.manager(), "GET", f"/api/academic/materials?classId={class_id}").data)
+        for a in api.call(seeder.manager(), "GET", f"/api/academic/assignments?classId={class_id}").data:
             statuses.add(a["status"])
+            exams += a["kind"] == "Exam" and bool(a.get("promptFileName"))
             if a["status"] == "Open":
                 graded += sum(bool(s["gradeVersion"]) for s in api.call(
                     seeder.manager(), "GET", f"/api/academic/assignments/{a['id']}/submissions").data)
     check("coursework", statuses >= {"Draft", "Upcoming", "Open", "Closed"} and graded > 0, f"{sorted(statuses)} graded={graded}")
+    check("class PDFs", materials > 0 and exams > 0, f"materials={materials} exams={exams}")
     recorded = sum(api.call(seeder.manager(), "GET", f"/api/academic/attendance/summary?classId={seeder.klass(c)['id']}").data["recordedCount"]
                    for c in CLASSES if c["n"])
     check("attendance", recorded > 0, f"{recorded} marks recorded")
@@ -1084,11 +1102,9 @@ def self_check():
     sample = session_plan(CLASSES[0], date(2026, 10, 29), date(2026, 12, 31), date(2026, 11, 19), base + timedelta(hours=10))
     ok(any(p["type"] == "MockTest" for p in sample) and all(len(p["unit"]) <= 100 and len(p["lesson"]) <= 200 for p in sample),
        "mock tests appear and labels fit server limits")
-    pdf = make_pdf("Bai nop", ["Hoc vien: Nguyễn Văn An"])
+    pdf = make_pdf("Bai nop", ["Hoc vien: Nguyễn Văn An", "Answer 1–4."])
+    ok(b"Answer 1-4." in pdf, "PDF preserves numeric ranges")
     ok(pdf.startswith(b"%PDF-") and len(pdf) >= 12 and b"%%EOF" in pdf[-1024:], "generated PDF passes the server's content check")
-    hashed = aspnet_hash("pw-for-check")
-    ok(aspnet_verify(hashed, "pw-for-check") and not aspnet_verify(hashed, "other") and len(hashed) < 512,
-       "Staff password hash round-trips in ASP.NET Identity V3 layout and fits 512 chars")
     ok(is_loopback("http://localhost:19000") and is_loopback("http://127.0.0.1:18080") and not is_loopback("https://example.com")
        and not is_loopback("http://10.0.0.5:8088") and not is_loopback("http://127.0.0.1@evil.example"),
        "loopback guard accepts only local URLs")

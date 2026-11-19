@@ -52,6 +52,7 @@ public sealed class ApiErrorContractTests
         public Task<RefreshSession?> FindSessionAsync(string hash, CancellationToken ct) => throw Boom();
         public Task<IReadOnlyList<RefreshSession>> SessionsAsync(Guid userId, CancellationToken ct) => throw Boom();
         public Task<IReadOnlyList<User>> UsersAsync(string? role, CancellationToken ct) => throw Boom();
+        public Task<ManagedAccountPage> ListManagedAccountsAsync(string role, string query, string? mobileDigits, int page, int pageSize, CancellationToken ct) => throw Boom();
         public void AddUser(User user) => throw Boom();
         public void AddSession(RefreshSession session) => throw Boom();
         public Task SaveAsync(CancellationToken ct) => throw Boom();

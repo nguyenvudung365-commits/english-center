@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { ArrowRight, BookOpen } from "lucide-react";
 import { ApiError } from "./api";
+import { localizeSystemMessage } from "./api-messages";
 import { pageCount } from "./format";
 
 export function ErrorMessage({ error }: { error: unknown }) {
@@ -8,12 +9,12 @@ export function ErrorMessage({ error }: { error: unknown }) {
     return (
         <div className="error" role="alert">
             <strong>
-                {error instanceof Error ? error.message : "Có lỗi xảy ra."}
+                {error instanceof ApiError ? error.message : localizeSystemMessage(error instanceof Error ? error.message : null, "Có lỗi xảy ra. Vui lòng thử lại.")}
             </strong>
             {error instanceof ApiError &&
                 Object.entries(error.errors).map(([field, messages]) => (
                     <p key={field}>
-                        {field}: {messages.join(" ")}
+                        {messages.join(" ")}
                     </p>
                 ))}
         </div>

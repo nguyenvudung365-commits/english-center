@@ -260,6 +260,10 @@ namespace EnglishCenter.Modules.Enrollment.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("student_id");
 
+                    b.Property<Guid?>("TransferredFromEnrollmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transferred_from_enrollment_id");
+
                     b.Property<decimal>("TuitionFee")
                         .HasPrecision(12)
                         .HasColumnType("numeric(12,0)")
@@ -268,6 +272,8 @@ namespace EnglishCenter.Modules.Enrollment.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ClassId");
+
+                    b.HasIndex("TransferredFromEnrollmentId");
 
                     b.HasIndex("StudentId", "ClassId")
                         .IsUnique();
@@ -388,6 +394,11 @@ namespace EnglishCenter.Modules.Enrollment.Infrastructure.Persistence.Migrations
                         .HasForeignKey("StudentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("EnglishCenter.Modules.Enrollment.Domain.Registrations.Registration", null)
+                        .WithMany()
+                        .HasForeignKey("TransferredFromEnrollmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("EnglishCenter.Modules.Enrollment.Domain.Registrations.Warning", b =>

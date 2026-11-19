@@ -3,6 +3,7 @@ using EnglishCenter.Modules.Identity.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Cryptography;
 using System.Text;
 using EnglishCenter.BuildingBlocks.Security;
@@ -63,6 +64,24 @@ public static class DependencyInjection
                 IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.SigningKey)),
                 ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
                 NameClaimType = AuthClaims.Subject, RoleClaimType = AuthClaims.Role, ClockSkew = TimeSpan.FromSeconds(30)
+            };
+            o.Events = new JwtBearerEvents
+            {
+                OnTokenValidated = async context =>
+                {
+                    if (context.Principal is not { } principal || !principal.TryGetUserId(out var userId) ||
+                        !Guid.TryParse(principal.FindFirst(JwtRegisteredClaimNames.Sid)?.Value, out var sessionId))
+                    {
+                        context.Fail("Invalid session.");
+                        return;
+                    }
+
+                    // JWT already enforces expiry; this lookup enforces revocation.
+                    var db = context.HttpContext.RequestServices.GetRequiredService<IdentityDbContext>();
+                    if (!await db.RefreshSessions.AnyAsync(x => x.Id == sessionId && x.UserId == userId &&
+                        x.RevokedAt == null, context.HttpContext.RequestAborted))
+                        context.Fail("Invalid session.");
+                }
             };
         });
         services.AddAuthorization();

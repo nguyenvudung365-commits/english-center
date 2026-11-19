@@ -40,6 +40,9 @@ internal sealed class AssignmentStore(AcademicDbContext db) : IAssignmentStore
         await db.ClassStudents.AsNoTracking().Where(x => x.ClassId == classId).Select(x => x.StudentId).Distinct().ToListAsync(ct);
     public async Task<IReadOnlyList<Guid>> StudentClassCandidatesAsync(Guid studentId, CancellationToken ct) =>
         await db.ClassStudents.AsNoTracking().Where(x => x.StudentId == studentId).Select(x => x.ClassId).Distinct().ToListAsync(ct);
+    public async Task<IReadOnlyList<Assignment>> TransferredSubmissionAssignmentsAsync(Guid studentId, IReadOnlyCollection<Guid> classIds, CancellationToken ct) =>
+        classIds.Count == 0 ? [] : await db.Assignments.AsNoTracking().Where(x => classIds.Contains(x.ClassId) &&
+            db.Submissions.Any(s => s.AssignmentId == x.Id && s.StudentId == studentId)).ToListAsync(ct);
     public async Task<IReadOnlyList<Assignment>> UnsentPublishedAsync(int max, CancellationToken ct) =>
         await db.Assignments.Where(x => x.PublishedAt != null && x.PublishedEventSentAt == null).OrderBy(x => x.Id).Take(max).ToListAsync(ct);
     public async Task<IReadOnlyList<SubmissionGrade>> UnsentGradesAsync(int max, CancellationToken ct) =>

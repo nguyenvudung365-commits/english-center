@@ -88,7 +88,7 @@ public sealed class Tv3Week2Tests : IAsyncLifetime
         {
             using var scope = _factory.Services.CreateScope();
             var user = await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().Users.SingleAsync(x => x.Role == Roles.Staff);
-            bearer = scope.ServiceProvider.GetRequiredService<ITokenService>().Issue(user, DateTimeOffset.UtcNow.AddHours(-2)).AccessToken;
+            bearer = scope.ServiceProvider.GetRequiredService<ITokenService>().Issue(user, Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(-2)).AccessToken;
         }
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
         Assert.Equal(HttpStatusCode.Unauthorized, (await _client.PostAsJsonAsync(Url, Valid())).StatusCode);

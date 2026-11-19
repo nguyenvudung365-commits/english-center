@@ -3,6 +3,7 @@ namespace EnglishCenter.Modules.Academic.Domain.Assignments;
 public sealed class Submission
 {
     public const int FeedbackMaxLength = 2000;
+    public const int AnswerMaxLength = 10000;
     public const decimal MinScore = 0m;
     public const decimal MaxScore = 10m;
 
@@ -16,6 +17,7 @@ public sealed class Submission
     // Chưa chấm = null, không giả điểm 0.
     public decimal? Score { get; private set; }
     public string? Feedback { get; private set; }
+    public string? AnswerText { get; private set; }
     public Guid? GradedBy { get; private set; }
     // 0 = chưa chấm; mỗi lần chấm/sửa điểm tăng 1 và có một dòng lịch sử cùng số version.
     public int GradeVersion { get; private set; }
@@ -27,17 +29,20 @@ public sealed class Submission
         if (assignmentId == Guid.Empty || studentId == Guid.Empty) throw new ArgumentException("Assignment and student required.");
         return new() { Id = Guid.NewGuid(), AssignmentId = assignmentId, StudentId = studentId };
     }
-    public void ReplaceFiles(IReadOnlyList<SubmissionFile> replacements, DateTimeOffset now)
+    public void ReplaceFiles(IReadOnlyList<SubmissionFile> replacements, DateTimeOffset now) => Replace(replacements, null, now);
+
+    public void Replace(IReadOnlyList<SubmissionFile> replacements, string? answerText, DateTimeOffset now)
     {
         if (GradedAt is not null) throw new InvalidOperationException("Graded work cannot be replaced.");
-        if (replacements.Count is < 1 or > 5 || replacements.Any(x => x.SubmissionId != Id) ||
+        if (answerText is not null && (string.IsNullOrWhiteSpace(answerText) || answerText.Length > AnswerMaxLength) ||
+            (replacements.Count == 0 && answerText is null) || replacements.Count > 5 || replacements.Any(x => x.SubmissionId != Id) ||
             replacements.Select(x => x.FileId).Distinct().Count() != replacements.Count)
-            throw new ArgumentException("One to five distinct attachments required.");
+            throw new ArgumentException("Provide an answer or up to five distinct attachments.");
         var ids = replacements.Select(x => x.FileId).ToHashSet();
         files.RemoveAll(x => !ids.Contains(x.FileId));
         foreach (var replacement in replacements)
             if (files.All(x => x.FileId != replacement.FileId)) files.Add(replacement);
-        SubmittedAt = now; Revision = Guid.NewGuid();
+        AnswerText = answerText; SubmittedAt = now; Revision = Guid.NewGuid();
     }
 
     public static bool IsValidScore(decimal score) =>

@@ -101,6 +101,12 @@ public sealed class AcademicAttendancePostgresTests : IAsyncLifetime
             Assert.False(db.Database.HasPendingModelChanges());
         }
         foreach (var table in tables) Assert.Equal(before[table], await SnapshotAsync(table));
+        Assert.Equal("0", await ScalarAsync("SELECT count(*)::text FROM academic.submissions WHERE answer_text IS NOT NULL"));
+        Assert.Equal("0", await ScalarAsync("""
+            SELECT count(*)::text FROM academic.assignments
+            WHERE prompt_content_type IS NOT NULL OR prompt_file_id IS NOT NULL OR prompt_file_name IS NOT NULL
+              OR prompt_owner_id IS NOT NULL OR prompt_size_bytes IS NOT NULL
+            """));
     }
 
     [PostgresFact]
@@ -402,8 +408,8 @@ public sealed class AcademicAttendancePostgresTests : IAsyncLifetime
     // Chỉ so sánh các cột đã tồn tại ở migration AddSessions.
     private static string AddedColumns(string table) => table switch
     {
-        "assignments" => "'created_at','created_by','is_legacy','kind','lesson','obligations_resolved_at','published_at','published_by','published_event_sent_at','session_id','unit','updated_at','version'",
-        "submissions" => "'feedback','grade_version','graded_by','score'",
+        "assignments" => "'created_at','created_by','is_legacy','kind','lesson','obligations_resolved_at','prompt_content_type','prompt_file_id','prompt_file_name','prompt_owner_id','prompt_size_bytes','published_at','published_by','published_event_sent_at','session_id','unit','updated_at','version'",
+        "submissions" => "'answer_text','feedback','grade_version','graded_by','score'",
         "sessions" => "'is_cancelled','revision'",
         "courses" => "'is_retired'",
         _ => "",

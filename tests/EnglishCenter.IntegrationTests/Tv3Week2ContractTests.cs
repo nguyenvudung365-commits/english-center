@@ -41,5 +41,8 @@ public sealed class Tv3Week2ContractTests
         Assert.NotEqual(source.EventId, replay.EventId);
         Assert.Equal(source.EnrollmentId, replay.EnrollmentId);
         Assert.Equal(source.EnrolledAtUtc, replay.EnrolledAtUtc);
+        Assert.False(restored.SkipInvoice);
+        var transfer = source with { SkipInvoice = true };
+        Assert.Equal(transfer, JsonSerializer.Deserialize<StudentEnrolledIntegrationEvent>(JsonSerializer.Serialize(transfer, Json), Json));
     }
 }

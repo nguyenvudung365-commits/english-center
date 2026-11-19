@@ -24,9 +24,8 @@ Ports (loopback only): API `18080`, web `18088`, MinIO `19000/19001`. Override i
 - Refuses non-loopback API/storage URLs, refuses an env file without the `DEMO_STACK` marker, and refuses to run if
   `ACADEMIC_RESOLVE_MISSED=true`. `ResolveMissed` is never enabled.
 - The script has no reset or volume deletion command.
-- Staff accounts cannot be created by any API (only Admin bootstrap exists), so `seed` inserts them with one
-  `INSERT ... ON CONFLICT DO NOTHING` into **this stack's own** Postgres via `docker compose exec`. No authorization
-  code or public permission changes. Both `seed` and `verify` require the API port to be published by the demo project on a local Docker context.
+- The bootstrap Admin provisions demo Staff through the API. Both `seed` and `verify` require the API port
+  to be published by the demo project on a local Docker context.
 
 ## Idempotency (preserve-on-repeat)
 
@@ -46,7 +45,7 @@ states are applied only on a run that created new activity, so a repeat never wi
 | Finance | invoices from enrollment, ~65% confirmed paid, the rest Unpaid |
 | Placement | Pending / Done / Cancelled tests for applicants and enrolled students |
 | Attendance | all six statuses, some corrected (revision history); a sample absence exceeds a limit of zero and creates a warning |
-| Coursework | per class: Open homework with PDF submissions and grades (some re-graded), Open in-class, Closed, Upcoming, Draft |
+| Coursework | class materials, PDF exams, homework with file submissions and grades, in-class work, and draft/upcoming/closed examples |
 | Practice | text exercises per class (teacher and staff authors) |
 | Feed | posts, comments, likes, one hidden post and one hidden comment (moderation) |
 | Feedback | 12 items in New / InProgress / Resolved |

@@ -9,8 +9,8 @@ public sealed class RefreshSession
     public DateTimeOffset ExpiresAt { get; private set; }
     public DateTimeOffset? RevokedAt { get; private set; }
 
-    public static RefreshSession Create(Guid userId, string hash, DateTimeOffset expiresAt) =>
-        new() { Id = Guid.NewGuid(), UserId = userId, TokenHash = hash, ExpiresAt = expiresAt };
+    public static RefreshSession Create(Guid id, Guid userId, string hash, DateTimeOffset expiresAt) =>
+        new() { Id = id, UserId = userId, TokenHash = hash, ExpiresAt = expiresAt };
 
     public bool IsActive(DateTimeOffset now) => RevokedAt is null && ExpiresAt > now;
     public void Rotate(string hash, DateTimeOffset expiresAt) => (TokenHash, ExpiresAt) = (hash, expiresAt);

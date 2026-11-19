@@ -84,6 +84,101 @@ public sealed partial class Tv3Week3Tests : IAsyncLifetime
         Assert.Equal(expected, (await Enroll()).StatusCode);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ClassTransfer_ReleasesSeatAndKeepsOriginalInvoice_EvenAfterReplay(bool paid)
+    {
+        var destination = await CreateClass(1);
+        using var enrollment = await Enroll();
+        enrollment.EnsureSuccessStatusCode();
+        var original = (await enrollment.Content.ReadFromJsonAsync<EnrollmentResponse>())!;
+        var invoice = await GetInvoice(original.Id);
+        if (paid)
+        {
+            (await _client.PostAsync($"/api/finance/invoices/{invoice.Id}/pay", null)).EnsureSuccessStatusCode();
+            invoice = await GetInvoice(original.Id);
+        }
+
+        await Login("Student");
+        Assert.Equal(HttpStatusCode.Forbidden, (await Move(original.Id, destination)).StatusCode);
+        await Login("Staff");
+        using var moved = await Move(original.Id, destination);
+        Assert.Equal(HttpStatusCode.Created, moved.StatusCode);
+        var target = (await moved.Content.ReadFromJsonAsync<EnrollmentResponse>())!;
+        Assert.Equal(destination, target.ClassId);
+        Assert.Equal(original.StudentId, target.StudentId);
+        Assert.Equal((original.MaxAbsences, original.MaxLates, original.MaxSkippedAssignments),
+            (target.MaxAbsences, target.MaxLates, target.MaxSkippedAssignments));
+        Assert.Equal(HttpStatusCode.Conflict, (await Move(original.Id, destination)).StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, (await _client.PostAsync($"{Url}/{target.Id}/replay", null)).StatusCode);
+        Assert.Equal(invoice, await GetInvoice(original.Id));
+        Assert.Equal(HttpStatusCode.NotFound, (await _client.GetAsync($"/api/finance/invoices/by-enrollment/{target.Id}")).StatusCode);
+        Assert.Single(_factory.Invoices);
+        var history = (await _client.GetFromJsonAsync<EnrollmentResponse>($"{Url}/{original.Id}"))!;
+        Assert.False(history.IsActive);
+        Assert.Equal("Cancelled", history.Status);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+            Assert.Equal(0, (await db.Classes.SingleAsync(x => x.ClassId == _class)).CurrentStudents);
+            Assert.Equal(1, (await db.Classes.SingleAsync(x => x.ClassId == destination)).CurrentStudents);
+            Assert.Equal(2, await scope.ServiceProvider.GetRequiredService<AcademicDbContext>().ClassStudents.CountAsync());
+        }
+        await Login("Student");
+        Assert.Equal(destination, Assert.Single((await _client.GetFromJsonAsync<List<StudentClassResponse>>("/api/academic/classes/mine"))!).ClassId);
+    }
+
+    [Fact]
+    public async Task ClassTransfer_RejectsFullClassWithoutChangingSourceEnrollmentOrSeats()
+    {
+        var destination = await CreateClass(1);
+        (await _client.PostAsJsonAsync(Url, Request(_other) with { ClassId = destination })).EnsureSuccessStatusCode();
+        using var enrollment = await Enroll();
+        enrollment.EnsureSuccessStatusCode();
+        var original = (await enrollment.Content.ReadFromJsonAsync<EnrollmentResponse>())!;
+        Assert.Equal(HttpStatusCode.Conflict, (await Move(original.Id, destination)).StatusCode);
+        Assert.Equal(original, await _client.GetFromJsonAsync<EnrollmentResponse>($"{Url}/{original.Id}"));
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+        Assert.All(await db.Classes.ToListAsync(), c => Assert.Equal(1, c.CurrentStudents));
+        Assert.Equal(2, await db.Enrollments.CountAsync());
+        Assert.Equal(2, _factory.Invoices.Count);
+    }
+
+    private Task<HttpResponseMessage> Move(Guid id, Guid targetClassId) =>
+        _client.PostAsJsonAsync($"{Url}/{id}/transfer", new { targetClassId });
+
+    [PgFact]
+    public async Task ClassTransfer_ConcurrentWithEnrollment_LastSeatHasOneWinner()
+    {
+        var destination = await CreateClass(1);
+        var ended = await CreateClass(1, Today.AddDays(-1));
+        using var enrollment = await Enroll();
+        enrollment.EnsureSuccessStatusCode();
+        var original = (await enrollment.Content.ReadFromJsonAsync<EnrollmentResponse>())!;
+        Assert.Equal(HttpStatusCode.BadRequest, (await Move(original.Id, ended)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Move(original.Id, _class)).StatusCode);
+        var responses = await Task.WhenAll(Move(original.Id, destination),
+            _client.PostAsJsonAsync(Url, Request(_other) with { ClassId = destination }));
+        Assert.Single(responses, x => x.StatusCode == HttpStatusCode.Created);
+        Assert.Single(responses, x => x.StatusCode == HttpStatusCode.Conflict);
+        var moved = responses[0].IsSuccessStatusCode;
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<EnrollmentDbContext>();
+        Assert.Equal(moved ? 0 : 1, (await db.Classes.SingleAsync(x => x.ClassId == _class)).CurrentStudents);
+        Assert.Equal(1, (await db.Classes.SingleAsync(x => x.ClassId == destination)).CurrentStudents);
+        Assert.Equal(moved ? "Cancelled" : "Active", (await db.Enrollments.FindAsync(original.Id))!.Status);
+        Assert.Equal(2, await db.Enrollments.CountAsync());
+        Assert.Equal(moved ? 1 : 2, _factory.Invoices.Count);
+        if (!moved)
+        {
+            var alternate = await CreateClass();
+            (await _client.PostAsJsonAsync(Url, Request(_student) with { ClassId = alternate })).EnsureSuccessStatusCode();
+            Assert.Equal(HttpStatusCode.Conflict, (await Move(original.Id, alternate)).StatusCode);
+        }
+    }
+
     [Fact]
     public async Task RealApis_EnrollPersistInvoiceAndOwnClass_ReplayDoesNotDuplicate()
     {

@@ -273,9 +273,11 @@ describe("Attendance frozen helper contract through the real session client", ()
     it("preserves stale revision409 errors and input, with no blind retry or overwrite", async () => {
         const body = { status: "Present" as const, expectedRevision: 1 };
         const original = structuredClone(body);
-        const errors = { ExpectedRevision: ["Attendance changed."] };
-        fetcher.mockResolvedValue(json({ title: "Revision conflict", errors }, 409));
-        await expect(recordAttendance(sessionId, studentId, body)).rejects.toMatchObject({ status: 409, message: "Revision conflict", errors });
+        const title = "Attendance changed concurrently. Reload before trying again.";
+        fetcher.mockResolvedValue(json({ title }, 409));
+        await expect(recordAttendance(sessionId, studentId, body)).rejects.toMatchObject({
+            status: 409, message: "Điểm danh đã thay đổi. Hãy tải lại trước khi thử lại.", serverTitle: title,
+        });
         expect(body).toEqual(original);
         expect(fetcher).toHaveBeenCalledTimes(1);
     });
@@ -294,10 +296,9 @@ describe("Attendance frozen helper contract through the real session client", ()
     });
 
     it("preserves explicit replay503 and durable failure message, without retrying POST", async () => {
-        const errors = { Dispatch: ["Source remains available for recovery."] };
-        fetcher.mockResolvedValue(json({ title: "Replay dispatch failed", errors }, 503));
+        fetcher.mockResolvedValue(json({ title: "Replay dispatch failed. The failed attempt is retained in the audit." }, 503));
         await expect(replayAttendance(attendanceId, { revision: 1, reason: "Recovery" })).rejects.toMatchObject({
-            status: 503, message: "Replay dispatch failed", errors,
+            status: 503, message: "Không gửi lại được sự kiện điểm danh. Lần thử này đã được lưu trong nhật ký.",
         });
         expect(fetcher).toHaveBeenCalledTimes(1);
     });

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getSession, setSession, type Session } from "./api";
-import { canCreateAccounts, createAccount, getProfile, updateProfile, uploadAvatar, validateAvatar } from "./identity";
+import { canCreateAccounts, createAccount, getProfile, listManagedAccounts, normalizeVietnamMobile, provisionStaff, setManagedAccountLock, updateProfile, uploadAvatar, validateAvatar } from "./identity";
 
 const session: Session = {
     accessToken: "test-token",
@@ -11,6 +11,35 @@ const session: Session = {
 afterEach(() => { setSession(null); vi.unstubAllGlobals(); });
 
 describe("Identity account and profile contracts", () => {
+    it.each([["", null], ["  ", null], ["090 123 4567", "+84901234567"],
+        ["+84 98.123-4567", "+84981234567"], ["0861234567", "+84861234567"], ["0521234567", "+84521234567"]])(
+        "normalizes an optional Vietnamese mobile %s", (input, expected) => {
+            expect(normalizeVietnamMobile(input)).toBe(expected);
+        },
+    );
+    it.each(["0281234567", "091234567", "09123456789", "+840912345678", "09a1234567", "０９１２３４５６７８", "0312345678", "-0901234567", "0901234567."])(
+        "rejects a changed invalid mobile %s with a field error", (input) => {
+            expect(() => normalizeVietnamMobile(input)).toThrow(/di động Việt Nam/);
+        },
+    );
+    it("preserves unchanged legacy values and supports clearing them", () => {
+        expect(normalizeVietnamMobile("0123456789", "0123456789")).toBe("0123456789");
+        expect(normalizeVietnamMobile("", "0123456789")).toBeNull();
+    });
+    it("encodes directory search and scopes staff provisioning and locking to their endpoints", async () => {
+        setSession(session);
+        const fetcher = vi.fn().mockImplementation(async () => new Response("{}"));
+        vi.stubGlobal("fetch", fetcher);
+        await listManagedAccounts("students", { q: "Lê + 10%", page: 2 });
+        expect(fetcher.mock.calls[0][0]).toBe("/api/identity/users/students?q=L%C3%AA+%2B+10%25&page=2");
+        await provisionStaff({ fullName: "Staff", email: "s@example.test", password: "test-password" });
+        expect(fetcher.mock.calls[1][0]).toBe("/api/identity/users/staff");
+        expect(JSON.parse(fetcher.mock.calls[1][1].body)).not.toHaveProperty("role");
+        await setManagedAccountLock("staff", "staff-id", true, "revision");
+        expect(fetcher.mock.calls[2][0]).toBe("/api/identity/users/staff/staff-id/lock");
+        expect(JSON.parse(fetcher.mock.calls[2][1].body)).toEqual({ isLocked: true, expectedRevision: "revision" });
+        expect(getSession()).toEqual(session);
+    });
     it("permits only Admin and Staff to create accounts", () => {
         expect(canCreateAccounts("Admin")).toBe(true);
         expect(canCreateAccounts("Staff")).toBe(true);
