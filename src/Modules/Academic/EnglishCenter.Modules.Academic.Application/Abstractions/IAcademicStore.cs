@@ -16,6 +16,8 @@ public interface IAcademicStore
         throw new NotSupportedException("The store must reload tracked teachers before retrying a snapshot conflict.");
     Task<IReadOnlyList<Teacher>> TeachersAsync(CancellationToken ct);
     void AddClass(Class academicClass);
+    Task SaveNewClassAsync(Class academicClass, CancellationToken ct);
+    void AddCourse(Course course);
     void AddTeacher(Teacher teacher);
 
     /// <summary>Lưu thay đổi; vi phạm ràng buộc unique được đổi thành <see cref="AcademicFailure"/> 409.</summary>

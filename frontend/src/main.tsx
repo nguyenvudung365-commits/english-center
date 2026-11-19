@@ -5,6 +5,7 @@ import React, {
     useSyncExternalStore,
 } from "react";
 import { createRoot } from "react-dom/client";
+import { zaloSupportUrl } from "./support-contact";
 import {
     BrowserRouter,
     Navigate,
@@ -38,17 +39,19 @@ import {
 } from "lucide-react";
 import {
     api,
+    getAuthState,
     getSession,
     getSessionGeneration,
     identity,
     login,
     logout,
-    setSession,
+    restoreSession,
     subscribe,
 } from "./api";
 import { canManageAcademic } from "./academic";
 import {
-    Catalog,
+    CourseManagement,
+    TeacherCatalog,
     ClassCreate,
     ClassDetails,
     Classes,
@@ -57,7 +60,7 @@ import {
 import { ErrorMessage, PageHeading, Unavailable } from "./ui";
 import { Assignments, AssignmentDetails, Enrollments } from "./assignment-pages";
 import { PracticeDetails, PracticePage } from "./practice-pages";
-import { AccountCreate, ProfilePanel } from "./identity-pages";
+import { AccountCreate, ProfilePanel, TeacherAdministration } from "./identity-pages";
 import { Schedule, SessionDetails } from "./schedule-pages";
 import { AttendancePage } from "./attendance-pages";
 import { ProgressPage, StatisticsPage } from "./statistics-pages";
@@ -75,6 +78,9 @@ const labels = {
     Teacher: "Giáo viên",
     Student: "Học viên",
 };
+const supportUrl = zaloSupportUrl(import.meta.env.VITE_SUPPORT_ZALO_URL);
+const supportOpensZaloApp = supportUrl?.startsWith("https://zaloapp.com/");
+
 function Login({ notice }: { notice: string }) {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -182,13 +188,42 @@ function Login({ notice }: { notice: string }) {
                         </button>
                     </form>
                     <p className="help">
-                        <LockKeyhole size={16} />
-                        Quên mật khẩu? Liên hệ giáo vụ để được hỗ trợ.
+                        <LockKeyhole size={16} aria-hidden="true" />
+                        <span>Quên mật khẩu? {supportUrl ? (
+                            <>
+                                <a href={supportUrl} target="_blank" rel="noopener noreferrer">
+                                    {supportOpensZaloApp ? "Liên hệ giáo vụ (mở ứng dụng Zalo, tab mới)" : "Liên hệ giáo vụ qua Zalo (mở tab mới)"}
+                                </a>
+                                {supportOpensZaloApp && " Nên mở trên điện thoại có Zalo; trên máy tính có thể chỉ hiện trang chủ Zalo."}
+                            </>
+                        ) : "Liên hệ giáo vụ để được hỗ trợ."}</span>
                     </p>
                     <p className="muted small">
-                        Phiên chỉ được giữ trong bộ nhớ. Tải lại trang sẽ yêu
-                        cầu đăng nhập lại.
+                        Phiên được giữ khi tải lại trang và kết thúc khi bạn
+                        đăng xuất hoặc đóng trình duyệt.
                     </p>
+                </div>
+            </section>
+        </main>
+    );
+}
+function Restoring({ state }: { state: "restoring" | "unavailable" | "logout-pending" }) {
+    const pendingLogout = state === "logout-pending";
+    return (
+        <main className="login">
+            <section className="login-form">
+                <div className="form-wrap">
+                    <h2 role="status">{pendingLogout ? "Chưa xác nhận đăng xuất" : state === "unavailable" ? "Chưa thể khôi phục phiên" : "Đang khôi phục phiên đăng nhập…"}</h2>
+                    {state !== "restoring" && (
+                        <>
+                            <p className="muted">
+                                {pendingLogout ? "Phiên sẽ không được mở lại. Thử lại để hoàn tất đăng xuất trên máy chủ." : "Không kết nối được máy chủ. Phiên của bạn chưa bị đăng xuất."}
+                            </p>
+                            <button className="primary" onClick={() => void restoreSession()}>
+                                Thử lại
+                            </button>
+                        </>
+                    )}
                 </div>
             </section>
         </main>
@@ -310,7 +345,8 @@ function Account({ onNotice }: { onNotice: (message: string) => void }) {
                                 onNotice(
                                     "Đổi mật khẩu thành công. Vui lòng đăng nhập lại.",
                                 );
-                                setSession(null);
+                                // The server revoked every session; logout also clears the refresh cookie.
+                                await logout().catch(() => undefined);
                             } catch (err) {
                                 if (!controller.signal.aborted && generation === getSessionGeneration()) setError(err);
                             } finally {
@@ -391,7 +427,8 @@ function navigation(role: import("./api").Role) {
               ]
             : []),
         ...(role === "Admin"
-            ? [{ to: "/faq/manage", label: "Quản trị FAQ", icon: CircleHelp }]
+            ? [{ to: "/users/teachers", label: "Quản trị giáo viên", icon: ShieldCheck },
+               { to: "/faq/manage", label: "Quản trị FAQ", icon: CircleHelp }]
             : []),
         ...(manager || role === "Student"
             ? [
@@ -428,6 +465,10 @@ function navigation(role: import("./api").Role) {
 function App() {
     const session = useSyncExternalStore(subscribe, getSession);
     const generation = useSyncExternalStore(subscribe, getSessionGeneration);
+    const authState = useSyncExternalStore(subscribe, getAuthState);
+    useEffect(() => {
+        void restoreSession();
+    }, []);
     const user = identity(session);
     const [notice, setNotice] = useState("");
     const [open, setOpen] = useState(false);
@@ -444,6 +485,7 @@ function App() {
     const location = useLocation();
     const authenticated = user !== null;
     const unread = useSyncExternalStore(subscribeUnread, getUnread);
+    useEffect(() => setUnread(null), [generation]);
     useEffect(() => {
         // Chỉ đọc nhẹ khi vào app/đổi route; trang Thông báo tự cập nhật số này.
         if (!authenticated) {
@@ -567,6 +609,7 @@ function App() {
         target?.focus();
         setFocusRequest(null);
     }, [focusRequest, drawerOpen, authenticated, mobile]);
+    if (!user && authState !== "ready") return <Restoring state={authState} />;
     if (!user) return <Login notice={notice} />;
     const links = navigation(user.role);
     const title =
@@ -716,6 +759,7 @@ function App() {
                             element={<Account onNotice={setNotice} />}
                         />
                         <Route path="/users/new" element={<AccountCreate />} />
+                        <Route path="/users/teachers" element={user.role === "Admin" ? <TeacherAdministration /> : <Navigate to="/" replace />} />
                         <Route path="/classes" element={<Classes />} />
                         <Route
                             path="/classes/new"
@@ -746,7 +790,7 @@ function App() {
                             path="/courses"
                             element={
                                 <ManagerOnly>
-                                    <Catalog kind="courses" />
+                                    <CourseManagement />
                                 </ManagerOnly>
                             }
                         />
@@ -754,7 +798,7 @@ function App() {
                             path="/teachers"
                             element={
                                 <ManagerOnly>
-                                    <Catalog kind="teachers" />
+                                    <TeacherCatalog />
                                 </ManagerOnly>
                             }
                         />

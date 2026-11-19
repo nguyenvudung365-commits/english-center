@@ -16,7 +16,7 @@ public sealed record MonitoringResult(Registration Enrollment, IReadOnlyList<War
 public interface IMonitoringStore
 {
     Task<MonitoringResult> SetLimitsAsync(Guid id, LimitsRequest request, DateTime now, CancellationToken ct);
-    Task<MonitoringResult> RecordAttendanceAsync(Guid session, Guid student, Guid classId, string status, DateTime at, DateTime now, CancellationToken ct);
+    Task<MonitoringResult> RecordAttendanceAsync(Guid session, Guid student, Guid classId, string status, DateTime at, int revision, DateTime now, CancellationToken ct);
     Task<MonitoringResult> RecordMissedAssignmentAsync(Guid assignment, Guid student, Guid classId, DateTime at, DateTime now, CancellationToken ct);
     Task<PageResult<WarningResponse>> WarningsAsync(Guid? student, Guid? enrollment, int page, int size, CancellationToken ct);
     Task<WarningResponse?> FindWarningAsync(Guid id, CancellationToken ct);

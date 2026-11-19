@@ -64,7 +64,23 @@ public sealed class ClassesController(ClassService classes) : ControllerBase
 public sealed class AcademicLookupController(ClassService classes) : ControllerBase
 {
     [HttpGet("courses")]
-    public Task<IReadOnlyList<CourseResponse>> Courses(CancellationToken ct) => classes.CoursesAsync(ct);
+    public Task<IReadOnlyList<CourseResponse>> Courses([FromQuery] bool includeRetired, CancellationToken ct) => classes.CoursesAsync(includeRetired, ct);
+
+    [HttpGet("courses/{id:guid}")]
+    public Task<CourseResponse> Course(Guid id, CancellationToken ct) => classes.CourseAsync(id, ct);
+
+    [HttpPost("courses")]
+    public async Task<IActionResult> CreateCourse(WriteCourseRequest request, CancellationToken ct)
+    {
+        var course = await classes.SaveCourseAsync(null, request, ct);
+        return CreatedAtAction(nameof(Course), new { id = course.Id }, course);
+    }
+
+    [HttpPut("courses/{id:guid}")]
+    public Task<CourseResponse> UpdateCourse(Guid id, WriteCourseRequest request, CancellationToken ct) => classes.SaveCourseAsync(id, request, ct);
+
+    [HttpPut("courses/{id:guid}/retirement")]
+    public Task<CourseResponse> RetireCourse(Guid id, RetireCourseRequest request, CancellationToken ct) => classes.RetireCourseAsync(id, request, ct);
 
     [HttpGet("teachers")]
     public Task<IReadOnlyList<TeacherResponse>> Teachers(CancellationToken ct) => classes.TeachersAsync(ct);

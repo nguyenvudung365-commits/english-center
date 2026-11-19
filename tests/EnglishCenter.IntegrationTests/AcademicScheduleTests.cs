@@ -34,6 +34,34 @@ public sealed class AcademicScheduleTests : IAsyncLifetime
     public async Task Anonymous_CannotCreateSession() =>
         Assert.Equal(HttpStatusCode.Unauthorized, (await Client.PostAsJsonAsync(SessionsUrl, fixture.Body())).StatusCode);
 
+    [Fact]
+    public async Task SessionChanges_AreAuthorizedVersionedAndReleaseCancelledSlot()
+    {
+        await fixture.AsAsync("staff");
+        var body = fixture.Body(fixture.Second);
+        var id = (await CreateAsync(body)).GetProperty("id").GetGuid();
+        var url = $"{SessionsUrl}/{id}";
+        body["expectedRevision"] = 0;
+        body["lesson"] = "Updated lesson";
+        await fixture.AsAsync("teacher");
+        Assert.Equal(HttpStatusCode.Forbidden, (await Client.PutAsJsonAsync(url, body)).StatusCode);
+        await fixture.AsAsync("staff");
+        (await Client.PutAsJsonAsync(url, body)).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.Conflict, (await Client.PutAsJsonAsync(url, body)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await Client.PostAsJsonAsync(SessionsUrl, fixture.Body())).StatusCode);
+        (await Client.PostAsJsonAsync(url + "/cancel", new { expectedRevision = 1 })).EnsureSuccessStatusCode();
+        await CreateAsync(fixture.Body());
+        await fixture.AsAsync("student");
+        var cancelled = await ReadAsync(url);
+        Assert.Equal(id, cancelled.GetProperty("id").GetGuid());
+        Assert.Equal("Updated lesson", cancelled.GetProperty("lesson").GetString());
+        Assert.True(cancelled.GetProperty("isCancelled").GetBoolean());
+        var notifications = await ReadAsync("/api/media-notification/notifications");
+        Assert.Equal(new[] { "SessionCancelled", "SessionUpdated" }, notifications.GetProperty("items").EnumerateArray()
+            .Where(x => x.GetProperty("targetId").GetGuid() == id)
+            .Select(x => x.GetProperty("kind").GetString()).Order().ToArray());
+    }
+
     [Theory]
     [InlineData("admin", 3)]
     [InlineData("staff", 3)]
@@ -548,8 +576,8 @@ public sealed class AcademicScheduleTests : IAsyncLifetime
 
     private static void AssertSessionShape(JsonElement value)
     {
-        Assert.Equal(new[] { "classCode", "classId", "className", "createdAtUtc", "endsAtUtc", "examSlot", "id", "lesson",
-            "sessionType", "skills", "startsAtUtc", "teacherId", "teacherName", "unit" }, value.EnumerateObject().Select(x => x.Name).Order());
+        Assert.Equal(new[] { "classCode", "classId", "className", "createdAtUtc", "endsAtUtc", "examSlot", "id", "isCancelled", "lesson",
+            "revision", "sessionType", "skills", "startsAtUtc", "teacherId", "teacherName", "unit" }, value.EnumerateObject().Select(x => x.Name).Order());
         Assert.Equal(TimeSpan.Zero, value.GetProperty("startsAtUtc").GetDateTimeOffset().Offset);
         Assert.Equal(TimeSpan.Zero, value.GetProperty("endsAtUtc").GetDateTimeOffset().Offset);
     }

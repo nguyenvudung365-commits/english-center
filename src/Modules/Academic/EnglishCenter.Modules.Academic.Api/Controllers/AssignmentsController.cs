@@ -37,7 +37,8 @@ public sealed class AssignmentsController(AssignmentService service) : Controlle
     public Task<IReadOnlyList<RecipientResponse>> Recipients(Guid id, CancellationToken ct) => service.RecipientsAsync(id, ct);
     // Đối soát chỉ đọc trước khi bật Academic:Coursework:ResolveMissed (không ghi, không phát event).
     [HttpGet("missed-preview"), Authorize(Roles = Roles.AccountManagers)]
-    public Task<MissedPreviewResponse> MissedPreview(CancellationToken ct) => service.PreviewMissedAsync(ct);
+    public Task<MissedPreviewResponse> MissedPreview([FromQuery] string? cursor, [FromQuery] int pageSize = 100,
+        CancellationToken ct = default) => service.PreviewMissedAsync(cursor, pageSize, ct);
     [HttpPost("{id:guid}/events/replay"), Authorize(Roles = Roles.AccountManagers)]
     public Task<ReplayEventsResponse> Replay(Guid id, CancellationToken ct) => service.ReplayEventsAsync(id, ct);
     [HttpPut("{id:guid}/submissions"), Authorize(Roles = Roles.Student)]

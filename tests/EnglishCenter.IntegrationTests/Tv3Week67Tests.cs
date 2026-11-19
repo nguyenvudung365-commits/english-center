@@ -112,6 +112,26 @@ public sealed partial class Tv3Week3Tests
     }
 
     [Fact]
+    public async Task AttendanceRevisions_UpdateCountersWithoutReplayingStaleStatus()
+    {
+        var enrollment = await EnrollValue();
+        await SetLimits(enrollment.Id, absence: 0);
+        using var scope = _factory.Services.CreateScope();
+        var bus = scope.ServiceProvider.GetRequiredService<IEventBus>();
+        var at = DateTime.UtcNow;
+        var first = new AttendanceRevisionRecordedIntegrationEvent(Guid.NewGuid(), Guid.NewGuid(), _class,
+            _student, "AbsentUnexcused", 1, Guid.NewGuid(), at);
+        var correction = first with { Status = "LateOver20Min", Revision = 2, RecordedAtUtc = at.AddSeconds(-1) };
+        await bus.PublishAsync(first, throwOnHandlerFailure: true);
+        await bus.PublishAsync(correction, throwOnHandlerFailure: true);
+        await bus.PublishAsync(first, throwOnHandlerFailure: true);
+        await bus.PublishAsync(correction, throwOnHandlerFailure: true);
+        var limits = (await _client.GetFromJsonAsync<LimitsResponse>(LimitsUrl(enrollment.Id)))!;
+        Assert.Equal((0, 1), (limits.AbsenceCount, limits.LateCount));
+        Assert.Single(_factory.WarningEvents, x => x.WarningType == "Absence");
+    }
+
+    [Fact]
     public async Task Week7_EnrollmentInvoiceAndWarning_FlowKeepsEachStudentsDataSeparate()
     {
         var enrollment = await EnrollValue();

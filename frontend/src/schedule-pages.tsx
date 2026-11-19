@@ -4,8 +4,8 @@ import { ApiError, getSession, getSessionGeneration, identity } from "./api";
 import { canManageAcademic, isAcademicId, listClasses, type ClassDetail } from "./academic";
 import { useRead } from "./academic-pages";
 import {
-    calendarRange, centerDate, createSession, getScheduledSession, listSessions,
-    navigateCalendar, sessionSkills, sessionsForDay, validateSessionDraft,
+    calendarRange, cancelSession, centerDate, getScheduledSession, listSessions,
+    navigateCalendar, saveSession, sessionLocalTime, sessionSkills, sessionsForDay, validateSessionDraft,
     type CalendarMode, type ScheduledSession, type SessionDraft,
 } from "./schedule";
 import { ErrorMessage, PageHeading } from "./ui";
@@ -37,11 +37,12 @@ async function allClasses(): Promise<ClassDetail[]> {
 }
 
 function SessionLink({ item }: { item: ScheduledSession }) {
+    const status = item.isCancelled ? "Đã hủy" : types[item.sessionType];
     return <Link className="session-link" to={`/schedule/${item.id}`}
-        aria-label={`${item.classCode}, ${item.lesson}, ${types[item.sessionType]}, ${fullTime(item.startsAtUtc)} đến ${fullTime(item.endsAtUtc)}, giờ Việt Nam`}>
+        aria-label={`${item.classCode}, ${item.lesson}, ${status}, ${fullTime(item.startsAtUtc)} đến ${fullTime(item.endsAtUtc)}, giờ Việt Nam`}>
         <time dateTime={item.startsAtUtc}>{timeLabel(item.startsAtUtc)}</time>
         <span className="session-calendar-name">{item.classCode} · {item.lesson}</span>
-        <span className="session-calendar-type">{types[item.sessionType]}</span>
+        <span className="session-calendar-type">{status}</span>
     </Link>;
 }
 
@@ -169,8 +170,15 @@ function ClassLoadState({ result }: { result: { loading: boolean; error: unknown
     </div>;
 }
 
-function SessionCreate({ classes, initialClassId, reload }: { classes: ClassDetail[] | null; initialClassId: string; reload: () => void }) {
-    const [draft, setDraft] = useState<SessionDraft>({ classId: initialClassId, unit: "", lesson: "", skills: [], sessionType: "Regular", examSlot: "", startsAtLocal: "", endsAtLocal: "" });
+function SessionCreate({ classes, initialClassId, reload, existing, onSaved }: {
+    classes: ClassDetail[] | null; initialClassId: string; reload: () => void;
+    existing?: ScheduledSession; onSaved?: () => void;
+}) {
+    const [draft, setDraft] = useState<SessionDraft>(() => ({ classId: initialClassId,
+        unit: existing?.unit ?? "", lesson: existing?.lesson ?? "", skills: existing?.skills ?? [],
+        sessionType: existing?.sessionType ?? "Regular", examSlot: existing?.examSlot ?? "",
+        startsAtLocal: existing ? sessionLocalTime(existing.startsAtUtc) : "", endsAtLocal: existing ? sessionLocalTime(existing.endsAtUtc) : "",
+    }));
     const [touched, setTouched] = useState<Record<string, boolean>>({});
     const [error, setError] = useState<unknown>();
     const [pending, setPending] = useState(false);
@@ -217,7 +225,7 @@ function SessionCreate({ classes, initialClassId, reload }: { classes: ClassDeta
         event.preventDefault();
         if (lock.current) return;
         setTouched(Object.fromEntries(Object.keys(draft).map((key) => [key, true])));
-        if (!classes?.length || invalid) {
+        if ((!existing && !classes?.length) || invalid) {
             requestAnimationFrame(() => form.current?.querySelector<HTMLElement>("[aria-invalid='true']")?.focus());
             return;
         }
@@ -226,9 +234,10 @@ function SessionCreate({ classes, initialClassId, reload }: { classes: ClassDeta
         setError(null);
         const generation = getSessionGeneration();
         try {
-            const created = await createSession(draft);
+            const created = await saveSession(draft, existing);
             if (!alive.current || generation !== getSessionGeneration()) return;
-            navigate(`/schedule/${created.id}`, { state: { createdId: created.id, generation } });
+            if (existing) onSaved?.();
+            else navigate(`/schedule/${created.id}`, { state: { createdId: created.id, generation } });
         } catch (failure) {
             if (alive.current && generation === getSessionGeneration()) setError(failure);
         } finally {
@@ -239,7 +248,7 @@ function SessionCreate({ classes, initialClassId, reload }: { classes: ClassDeta
         }
     }}>
         <div className="academic-fields">
-            {field("classId", "Lớp học", <select {...attributes("classId")} required disabled={pending || !classes?.length}>
+            {!existing && field("classId", "Lớp học", <select {...attributes("classId")} required disabled={pending || !classes?.length}>
                 <option value="">Chọn lớp học</option>
                 {draft.classId && !classes?.some((item) => item.id === draft.classId) && <option value={draft.classId}>Lớp đang chọn (chờ xác minh)</option>}
                 {classes?.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}
@@ -264,10 +273,10 @@ function SessionCreate({ classes, initialClassId, reload }: { classes: ClassDeta
             {messages("skills")}
         </fieldset>
         <ErrorMessage error={error} />
-        {error instanceof ApiError && error.status === 409 && <div className="conflict-help"><p>Lịch giáo viên đã trùng hoặc thay đổi. Dữ liệu bạn nhập vẫn được giữ; tải lại lịch rồi chọn thời gian khác, không tự gửi lại yêu cầu.</p><button type="button" className="secondary" onClick={reload}>Tải lại lịch và lớp, giữ biểu mẫu</button></div>}
+        {error instanceof ApiError && error.status === 409 && <div className="conflict-help"><p>{existing ? "Buổi học có thể đã thay đổi, trùng lịch hoặc có điểm danh. Kiểm tra thời gian hoặc tải lại trước khi thử lại." : "Lịch giáo viên đã trùng hoặc thay đổi. Dữ liệu bạn nhập vẫn được giữ; tải lại lịch rồi chọn thời gian khác, không tự gửi lại yêu cầu."}</p><button type="button" className="secondary" onClick={reload}>{existing ? "Bỏ bản sửa và tải lại" : "Tải lại lịch và lớp, giữ biểu mẫu"}</button></div>}
         {error instanceof ApiError && error.status === 0 && <p>Chưa xác nhận được yêu cầu đã lưu hay chưa. Kiểm tra lịch trước khi gửi lại để tránh tạo trùng.</p>}
         <p className="small muted" id="session-submit-help">{pending ? "Đang lưu buổi học. Vui lòng chờ kết quả." : "Ngày giờ nhập luôn là giờ Việt Nam, không phụ thuộc múi giờ của thiết bị."}</p>
-        <button className="primary" disabled={pending || !classes?.length} aria-describedby="session-submit-help">{pending ? "Đang tạo buổi học…" : "Lưu buổi học"}</button>
+        <button className="primary" disabled={pending || (!existing && !classes?.length)} aria-describedby="session-submit-help">{pending ? "Đang lưu buổi học…" : "Lưu buổi học"}</button>
     </form>;
 }
 
@@ -278,15 +287,38 @@ export function SessionDetails() {
     const location = useLocation();
     const created = location.state?.createdId === id && location.state?.generation === getSessionGeneration();
     const item = result.data;
+    const manager = canManageAcademic(identity(getSession())!.role);
+    return <SessionDetailView key={id} item={item} manager={manager} created={created} result={result} />;
+}
+
+function SessionDetailView({ item, manager, created, result }: {
+    item: ScheduledSession | null; manager: boolean; created: boolean; result: ReturnType<typeof useRead<ScheduledSession>>;
+}) {
+    const [editing, setEditing] = useState(false);
+    const [pending, setPending] = useState(false);
+    const [error, setError] = useState<unknown>();
+    const [notice, setNotice] = useState("");
+    const cancelling = useRef(false);
+    async function cancel() {
+        if (!item || cancelling.current || !window.confirm("Hủy buổi học này? Lịch sử điểm danh vẫn được giữ và không thể mở lại buổi học.")) return;
+        cancelling.current = true;
+        setPending(true); setError(null); setNotice("");
+        try {
+            await cancelSession(item);
+            setNotice("Đã hủy buổi học."); result.retry();
+        } catch (failure) { setError(failure); }
+        finally { cancelling.current = false; setPending(false); }
+    }
     return <>
         <PageHeading title="Chi tiết buổi học" subtitle="Thông tin được tải trực tiếp từ Academic. Ngày giờ Việt Nam (UTC+7)." />
         <div className="academic-actions"><Link className="secondary inline" to="/schedule">Về lịch học</Link></div>
         {created && <p className="notice" role="status">Đã tạo buổi học thành công. {result.error ? "Chưa đọc được chi tiết; chỉ tải lại, không tạo lại buổi học." : result.loading ? "Đang đọc thông tin từ máy chủ." : "Đang hiển thị thông tin từ máy chủ."}</p>}
         {result.loading && <p role="status">Đang tải chi tiết buổi học…</p>}
         <ErrorMessage error={result.error} />
-        {result.error && isAcademicId(id) ? <button className="secondary" onClick={result.retry}>Thử tải lại chi tiết buổi học</button> : null}
+        {result.error ? <button className="secondary" onClick={result.retry}>Thử tải lại chi tiết buổi học</button> : null}
+        {notice && <p className="notice" role="status">{notice}</p>}
         {item && <section className="panel class-result">
-            <span className="pill">{types[item.sessionType]}</span>
+            <span className="pill">{item.isCancelled ? "Đã hủy" : types[item.sessionType]}</span>
             <h2>{item.lesson}</h2>
             <dl className="academic-detail">
                 <dt>Lớp học</dt><dd><Link className="accent" to={`/classes/${item.classId}`}>{item.classCode} · {item.className}</Link></dd>
@@ -300,6 +332,19 @@ export function SessionDetails() {
             </dl>
             <Link className="primary inline" to={`/schedule?classId=${encodeURIComponent(item.classId)}&date=${centerDate(item.startsAtUtc)}`}>Xem trên lịch lớp</Link>
             <Link className="secondary inline" to={`/attendance/${item.id}`}>{identity(getSession())?.role === "Student" ? "Điểm danh của tôi trong buổi này" : "Xem điểm danh buổi học"}</Link>
+            {manager && !item.isCancelled && !editing && <div className="academic-actions">
+                <button className="secondary" disabled={pending} onClick={() => { setEditing(true); setNotice(""); setError(null); }}>Sửa buổi học</button>
+                <button className="secondary" disabled={pending} onClick={() => void cancel()}>{pending ? "Đang hủy…" : "Hủy buổi học"}</button>
+                <ErrorMessage error={error} />
+                {error ? <button className="secondary" onClick={() => { setError(null); result.retry(); }}>Tải lại buổi học</button> : null}
+            </div>}
+        </section>}
+        {item && manager && !item.isCancelled && editing && <section className="panel">
+            <h2>Sửa buổi học</h2>
+            <button className="secondary" onClick={() => setEditing(false)}>Đóng biểu mẫu</button>
+            <SessionCreate key={item.revision} classes={null} initialClassId={item.classId} existing={item}
+                reload={() => { setEditing(false); result.retry(); }}
+                onSaved={() => { setEditing(false); setNotice("Đã cập nhật buổi học."); result.retry(); }} />
         </section>}
     </>;
 }

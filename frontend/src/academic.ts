@@ -91,6 +91,14 @@ export function validateClassDraft(
     return errors;
 }
 export const listCourses = () => api<Course[]>("/academic/courses");
+type ManagedCourse = Course & { isRetired: boolean };
+export const listManagedCourses = () => api<ManagedCourse[]>("/academic/courses?includeRetired=true");
+export const saveCourse = (draft: Omit<Course, "id">, id?: string) => api<ManagedCourse>(`/academic/courses${id ? `/${id}` : ""}`, {
+    method: id ? "PUT" : "POST", body: JSON.stringify(draft),
+});
+export const setCourseRetired = (id: string, isRetired: boolean) => api<ManagedCourse>(`/academic/courses/${id}/retirement`, {
+    method: "PUT", body: JSON.stringify({ isRetired }),
+});
 export const listTeachers = () => api<Teacher[]>("/academic/teachers");
 export type ClassQuery = {
     search?: string;

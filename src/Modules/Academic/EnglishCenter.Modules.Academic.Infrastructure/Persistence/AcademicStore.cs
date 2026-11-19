@@ -30,6 +30,18 @@ internal sealed class AcademicStore(AcademicDbContext db) : IAcademicStore
     public async Task<IReadOnlyList<Teacher>> TeachersAsync(CancellationToken ct) =>
         await db.Teachers.AsNoTracking().OrderBy(x => x.FullName).ToListAsync(ct);
     public void AddClass(Class academicClass) => db.Classes.Add(academicClass);
+    public void AddCourse(Course course) => db.Courses.Add(course);
+    public async Task SaveNewClassAsync(Class academicClass, CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        // Lock the active course until the new class commits; retirement uses the same row.
+        var locked = await db.Courses.Where(x => x.Id == academicClass.CourseId && !x.IsRetired)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.IsRetired, x => x.IsRetired), ct);
+        if (locked == 0) throw new AcademicFailure(400, "Course is no longer active.");
+        AddClass(academicClass);
+        await SaveAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
     public void AddTeacher(Teacher teacher) => db.Teachers.Add(teacher);
     public async Task SaveAsync(CancellationToken ct)
     {

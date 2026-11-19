@@ -24,13 +24,13 @@ export function PageHeading({
     subtitle,
 }: {
     title: string;
-    subtitle: string;
+    subtitle?: string;
 }) {
     return (
         <div className="page-heading">
             <span className="eyebrow">ENGLISH CENTER</span>
             <h1>{title}</h1>
-            <p>{subtitle}</p>
+            {subtitle && <p>{subtitle}</p>}
         </div>
     );
 }

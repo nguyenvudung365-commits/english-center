@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Check, Eye, EyeOff, ShieldCheck, Upload, UserPlus, UserRound } from "lucide-react";
-import { ApiError, getSession, identity } from "./api";
+import { api, ApiError, getSession, identity } from "./api";
+import { useRead } from "./academic-pages";
 import { PageHeading } from "./ui";
 import {
     canCreateAccounts, createAccount, getProfile, updateProfile, uploadAvatar, validateAvatar,
@@ -8,6 +9,68 @@ import {
 } from "./identity";
 
 const roleLabels = { Admin: "Quản trị viên", Staff: "Giáo vụ", Teacher: "Giáo viên", Student: "Học viên" };
+type ManagedTeacher = { id: string; fullName: string; email: string; phone: string | null; isLocked: boolean; revision: string };
+const teachersPath = "/identity/users/teachers";
+const loadTeachers = () => api<ManagedTeacher[]>(teachersPath);
+
+export function TeacherAdministration() {
+    const result = useRead(loadTeachers);
+    const [query, setQuery] = useState("");
+    const [selected, setSelected] = useState<ManagedTeacher | null>(null);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<unknown>();
+    const [notice, setNotice] = useState("");
+
+    async function save(lock = false) {
+        if (!selected || busy) return;
+        if (lock && !window.confirm(selected.isLocked ? "Mở khóa tài khoản này?" : "Khóa tài khoản này và thu hồi phiên đăng nhập?")) return;
+        const { id, fullName, email, phone, isLocked, revision: expectedRevision } = selected;
+        setBusy(true); setError(null); setNotice("");
+        try {
+            const value = await api<ManagedTeacher>(`${teachersPath}/${id}${lock ? "/lock" : ""}`, {
+                method: "PUT", body: JSON.stringify(lock ? { expectedRevision, isLocked: !isLocked } : { expectedRevision, fullName, email, phone }),
+            });
+            setSelected(value); result.retry();
+            setNotice(lock ? (value.isLocked ? "Đã khóa tài khoản." : "Đã mở khóa tài khoản.") : "Đã lưu hồ sơ giáo viên.");
+        } catch (err) { setError(err); }
+        finally { setBusy(false); }
+    }
+
+    const visible = result.data?.filter(x => `${x.fullName} ${x.email}`.toLocaleLowerCase("vi").includes(query.trim().toLocaleLowerCase("vi")));
+    return <>
+        <PageHeading title="Quản trị giáo viên" />
+        <section className="panel">
+            <label htmlFor="managed-teacher-search">Tìm tên hoặc email</label>
+            <input id="managed-teacher-search" type="search" value={query} onChange={e => setQuery(e.target.value)} />
+            {result.loading && <p role="status">Đang tải tài khoản…</p>}
+            {result.error ? <><FormError error={result.error} prefix="managed-teacher" />
+                <button className="secondary" onClick={result.retry}>Thử lại</button></> : null}
+            {visible?.length === 0 && <p role="status">Không có giáo viên phù hợp.</p>}
+            {visible?.length ? <ul className="catalog-list">{visible.map(x => <li key={x.id}>
+                <h2>{x.fullName}</h2><p>{x.email} · {x.isLocked ? "Đã khóa" : "Hoạt động"}</p>
+                <button className="secondary" disabled={busy} onClick={() => { setSelected(x); setError(null); setNotice(""); }}>
+                    Quản lý<span className="sr-only"> {x.fullName}</span>
+                </button>
+            </li>)}</ul> : null}
+        </section>
+        {selected && <form className="panel" onSubmit={e => { e.preventDefault(); void save(); }}>
+            <h2>Hồ sơ: {selected.fullName}</h2>
+            <fieldset disabled={busy}>
+                <label htmlFor="managed-teacher-fullName">Họ và tên</label>
+                <input id="managed-teacher-fullName" required maxLength={200} value={selected.fullName} onChange={e => setSelected({ ...selected, fullName: e.target.value })} />
+                <label htmlFor="managed-teacher-email">Email</label>
+                <input id="managed-teacher-email" required type="email" maxLength={254} value={selected.email} onChange={e => setSelected({ ...selected, email: e.target.value })} />
+                <label htmlFor="managed-teacher-phone">Số điện thoại</label>
+                <input id="managed-teacher-phone" type="tel" maxLength={32} value={selected.phone ?? ""} onChange={e => setSelected({ ...selected, phone: e.target.value })} />
+                <button className="primary" type="submit">Lưu hồ sơ</button>{" "}
+                <button className="secondary" type="button" onClick={() => void save(true)}>{selected.isLocked ? "Mở khóa" : "Khóa tài khoản"}</button>{" "}
+                <button className="secondary" type="button" onClick={() => { setSelected(null); result.retry(); }}>Đóng và tải lại danh sách</button>
+            </fieldset>
+            <FormError error={error} prefix="managed-teacher" />
+            <p role="status">{notice}</p>
+        </form>}
+    </>;
+}
 const fieldLabels: Record<string, string> = {
     fullName: "Họ và tên", email: "Email", phone: "Số điện thoại", password: "Mật khẩu tạm thời",
     confirm: "Xác nhận mật khẩu", role: "Vai trò", avatarFileId: "Ảnh đại diện", expectedRevision: "Phiên bản hồ sơ",

@@ -4,6 +4,7 @@ using EnglishCenter.Modules.Academic.Application.Sessions;
 using EnglishCenter.Modules.Academic.Domain.Classes;
 using EnglishCenter.Modules.Academic.Domain.Sessions;
 using EnglishCenter.Modules.Academic.Domain.Teachers;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 using static EnglishCenter.Academic.Tests.SessionDomainTests;
 
@@ -25,7 +26,7 @@ public sealed class SessionServiceTests
         classes.Teachers.Add(Teacher.Create(teacher, "Teacher", "teacher@example.test"));
     }
     private SessionService Service => new(sessions, classes, policy.Access, policy,
-        new FixedClock(new(Start.AddDays(-1).AddTicks(1234567))));
+        new FixedClock(new(Start.AddDays(-1).AddTicks(1234567))), new RecordingEventBus(), NullLogger<SessionService>.Instance);
     private CreateSessionRequest Request => new(item.Id, new DateTimeOffset(2027, 1, 1, 17, 0, 0, TimeSpan.FromHours(7)),
         new DateTimeOffset(2027, 1, 1, 18, 0, 0, TimeSpan.FromHours(7)), " Unit ' 🗓 ", " Bài học ", ["speaking", "LISTENING"], "regular", " ");
 
@@ -215,5 +216,7 @@ public sealed class SessionServiceTests
             if (Failure is not null) return Task.FromException(Failure);
             ct.ThrowIfCancellationRequested(); Items.Add(session); return Task.CompletedTask;
         }
+        public Task<Session> ChangeAsync(Guid id, Guid classId, Guid teacherId, int expectedRevision, Session? replacement, CancellationToken ct) =>
+            throw new NotSupportedException();
     }
 }

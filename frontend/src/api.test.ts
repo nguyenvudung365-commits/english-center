@@ -151,17 +151,15 @@ describe("API session contract", () => {
         expect(fetcher).toHaveBeenCalledTimes(3);
         expect(getSession()).toBeNull();
     });
-    it("logout sends the rotated refresh token after access expiry", async () => {
+    it("logout after access expiry needs no preliminary refresh: cookie header and empty body", async () => {
         setSession(tokens(true));
-        fetcher
-            .mockResolvedValueOnce(
-                json({ ...tokens(), refreshToken: "rotated" }),
-            )
-            .mockResolvedValueOnce(new Response(null, { status: 204 }));
+        fetcher.mockResolvedValueOnce(new Response(null, { status: 204 }));
         await logout();
-        expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).toEqual({
-            refreshToken: "rotated",
-        });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+        const [url, init] = fetcher.mock.calls[0];
+        expect(url).toBe("/api/identity/auth/logout");
+        expect(new Headers(init?.headers).get("X-Session-Mode")).toBe("cookie");
+        expect(JSON.parse(String(init?.body))).toEqual({});
         expect(getSession()).toBeNull();
     });
     it("clears local credentials even when logout network fails", async () => {

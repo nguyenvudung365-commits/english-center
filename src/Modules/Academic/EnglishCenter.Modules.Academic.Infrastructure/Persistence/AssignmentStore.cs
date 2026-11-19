@@ -47,14 +47,27 @@ internal sealed class AssignmentStore(AcademicDbContext db) : IAssignmentStore
     public async Task<IReadOnlyList<AssignmentRecipient>> UnsentMissedAsync(int max, CancellationToken ct) =>
         await db.AssignmentRecipients.Where(x => x.Outcome == ObligationOutcome.Missed && x.MissedEventSentAt == null)
             .OrderBy(x => x.AssignmentId).ThenBy(x => x.StudentId).Take(max).ToListAsync(ct);
-    public async Task<IReadOnlyList<Assignment>> DueUnresolvedAsync(DateTimeOffset dueBy, int max, CancellationToken ct)
+    public async Task<IReadOnlyList<Assignment>> DueUnresolvedAsync(DateTimeOffset dueBy, int max, CancellationToken ct,
+        MissedPreviewPosition? after = null, bool readOnly = false)
     {
         // Chọn bài đến hạn trên tập chiếu nhỏ (Id, hạn) để bài chưa đến hạn không chiếm chỗ của bài đã quá hạn.
-        var candidates = await db.Assignments.AsNoTracking()
-            .Where(x => x.PublishedAt != null && !x.IsLegacy && x.ObligationsResolvedAt == null)
-            .Select(x => new { x.Id, x.ClosesAtUtc }).ToListAsync(ct);
-        var ids = candidates.Where(x => x.ClosesAtUtc <= dueBy).OrderBy(x => x.ClosesAtUtc).Take(max).Select(x => x.Id).ToList();
-        return ids.Count == 0 ? [] : await db.Assignments.Where(x => ids.Contains(x.Id)).ToListAsync(ct);
+        var query = db.Assignments.Where(x => x.PublishedAt != null && !x.IsLegacy && x.ObligationsResolvedAt == null);
+        if (readOnly) query = query.AsNoTracking();
+        if (db.Database.IsNpgsql())
+        {
+            query = query.Where(x => x.ClosesAtUtc <= dueBy);
+            if (after is not null)
+                query = query.Where(x => EF.Functions.GreaterThan(ValueTuple.Create(x.ClosesAtUtc, x.Id),
+                    ValueTuple.Create(after.ClosesAtUtc, after.AssignmentId)));
+            return await query.OrderBy(x => x.ClosesAtUtc).ThenBy(x => x.Id).Take(max).ToListAsync(ct);
+        }
+        var candidates = await query.AsNoTracking().Select(x => new { x.Id, x.ClosesAtUtc }).ToListAsync(ct);
+        var ids = candidates.Where(x => x.ClosesAtUtc <= dueBy && (after is null || x.ClosesAtUtc > after.ClosesAtUtc ||
+            (x.ClosesAtUtc == after.ClosesAtUtc && x.Id.CompareTo(after.AssignmentId) > 0)))
+            .OrderBy(x => x.ClosesAtUtc).ThenBy(x => x.Id).Take(max).Select(x => x.Id).ToArray();
+        if (ids.Length == 0) return [];
+        var rows = (await query.Where(x => ids.Contains(x.Id)).ToListAsync(ct)).ToDictionary(x => x.Id);
+        return ids.Where(rows.ContainsKey).Select(id => rows[id]).ToList();
     }
     public void Add(Assignment item) => db.Assignments.Add(item);
     public void Add(Submission item) => db.Submissions.Add(item);

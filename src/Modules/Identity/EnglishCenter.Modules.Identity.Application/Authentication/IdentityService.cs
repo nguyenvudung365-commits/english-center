@@ -11,7 +11,7 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
     ITokenService tokens, IEventBus events, TimeProvider clock, ICurrentUser? currentUser = null,
     IStudentCodeGenerator? studentCodes = null, IAvatarFileAccess? avatarFiles = null)
 {
-    public async Task<TokenResponse> LoginAsync(LoginRequest request, CancellationToken ct)
+    public async Task<(TokenResponse Tokens, Guid SessionId)> LoginAsync(LoginRequest request, CancellationToken ct)
     {
         Validate(request);
         var user = await store.FindByEmailAsync(User.NormalizeEmail(request.Email), ct);
@@ -19,9 +19,9 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
         var valid = passwords.Verify(user?.PasswordHash, request.Password);
         if (user is null || !valid) throw InvalidCredentials();
         if (user.IsLocked) throw new IdentityFailure(403, "Account is locked.");
-        var response = Issue(user);
+        var response = Issue(user, out var session);
         await store.SaveAsync(ct);
-        return response;
+        return (response, session.Id);
     }
 
     public async Task<TokenResponse> RefreshAsync(RefreshRequest request, CancellationToken ct)
@@ -32,7 +32,7 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
         var user = await store.FindUserAsync(session.UserId, ct);
         if (user is null || user.IsLocked) throw InvalidCredentials();
         session.Revoke(clock.GetUtcNow());
-        var response = Issue(user);
+        var response = Issue(user, out _);
         await store.SaveAsync(ct);
         return response;
     }
@@ -40,10 +40,37 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
     public async Task LogoutAsync(Guid userId, RefreshRequest request, CancellationToken ct)
     {
         Validate(request);
-        var session = await store.FindSessionAsync(tokens.HashRefreshToken(request.RefreshToken), ct);
-        if (session is null || session.UserId != userId || !session.IsActive(clock.GetUtcNow()))
+        await RevokeSessionAsync(userId, request.RefreshToken, null, ct);
+    }
+
+    public async Task<(TokenResponse Tokens, Guid SessionId)> RefreshBrowserAsync(string cookie, Guid? expectedSession, CancellationToken ct)
+    {
+        var session = await store.FindSessionAsync(tokens.HashRefreshToken(cookie), ct);
+        if (session is null || !session.IsActive(clock.GetUtcNow())) throw InvalidCredentials();
+        if (expectedSession is not null && session.Id != expectedSession) throw InvalidCredentials();
+        var user = await store.FindUserAsync(session.UserId, ct);
+        if (user is null || user.IsLocked) throw InvalidCredentials();
+        var response = tokens.Issue(user, clock.GetUtcNow());
+        // Keep the browser session identity stable while rotating its single-use credential.
+        session.Rotate(tokens.HashRefreshToken(response.RefreshToken), response.RefreshTokenExpiresAt);
+        user.Touch();
+        await store.SaveAsync(ct);
+        return (response, session.Id);
+    }
+
+    // userId is null for cookie-only logout, where the refresh cookie is the sole credential.
+    public async Task RevokeSessionAsync(Guid? userId, string refreshToken, Guid? expectedSession, CancellationToken ct)
+    {
+        var session = await store.FindSessionAsync(tokens.HashRefreshToken(refreshToken), ct);
+        if (session is null || (userId is not null && session.UserId != userId) ||
+            (expectedSession is not null && session.Id != expectedSession))
             throw InvalidCredentials();
-        var user = await store.FindUserAsync(userId, ct) ?? throw InvalidCredentials();
+        if (!session.IsActive(clock.GetUtcNow()))
+        {
+            if (expectedSession is not null) return; // Confirm logout after password change or expiry.
+            throw InvalidCredentials();
+        }
+        var user = await store.FindUserAsync(session.UserId, ct) ?? throw InvalidCredentials();
         session.Revoke(clock.GetUtcNow());
         user.Touch();
         await store.SaveAsync(ct);
@@ -102,6 +129,62 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
         var oldVersion = user.ProfileVersion;
         user.UpdateProfile(request.FullName, request.Email, request.Phone, request.AvatarFileId);
         await store.SaveAsync(ct);
+        await PublishProfileAsync(user, oldVersion, ct);
+        return Response(user, avatar);
+    }
+
+    public async Task<IReadOnlyList<ManagedTeacher>> TeachersAsync(CancellationToken ct)
+    {
+        await RequireAdminAsync(ct);
+        return (await store.UsersAsync(Roles.Teacher, ct)).OrderBy(x => x.FullName).ThenBy(x => x.Id).Select(Teacher).ToArray();
+    }
+
+    public async Task<ManagedTeacher> UpdateTeacherAsync(Guid id, UpdateTeacherRequest request, CancellationToken ct)
+    {
+        var user = await RequireTeacherAsync(id, request.ExpectedRevision, ct);
+        request = request with { FullName = request.FullName?.Trim()!, Email = request.Email?.Trim()!, Phone = NormalizePhone(request.Phone) };
+        Validate(request);
+        var existing = await store.FindByEmailAsync(User.NormalizeEmail(request.Email), ct);
+        if (existing is not null && existing.Id != user.Id) throw new IdentityFailure(409, "Email is already registered.");
+        var version = user.ProfileVersion;
+        user.UpdateProfile(request.FullName, request.Email, request.Phone, user.AvatarFileId);
+        await store.SaveAsync(ct);
+        await PublishProfileAsync(user, version, ct);
+        return Teacher(user);
+    }
+
+    public async Task<ManagedTeacher> SetTeacherLockAsync(Guid id, TeacherLockRequest request, CancellationToken ct)
+    {
+        var user = await RequireTeacherAsync(id, request.ExpectedRevision, ct);
+        Validate(request);
+        if (user.IsLocked == request.IsLocked!.Value) return Teacher(user);
+        user.SetLocked(request.IsLocked.Value);
+        if (user.IsLocked)
+            foreach (var session in await store.SessionsAsync(id, ct)) session.Revoke(clock.GetUtcNow());
+        await store.SaveAsync(ct);
+        return Teacher(user);
+    }
+
+    private async Task RequireAdminAsync(CancellationToken ct)
+    {
+        if ((await RequireActiveUserAsync(ct)).Role != Roles.Admin)
+            throw new IdentityFailure(403, "Only Admin can manage teachers.");
+    }
+
+    private async Task<User> RequireTeacherAsync(Guid id, Guid? revision, CancellationToken ct)
+    {
+        await RequireAdminAsync(ct);
+        var user = await store.FindUserAsync(id, ct);
+        if (user is null || user.Role != Roles.Teacher) throw new IdentityFailure(404, "Teacher account not found.");
+        if (revision is null || revision == Guid.Empty) throw FieldError("ExpectedRevision", "A valid expected revision is required.");
+        if (user.Revision != revision) throw new IdentityFailure(409, "Account changed. Reload before saving.");
+        return user;
+    }
+
+    private static ManagedTeacher Teacher(User user) => new(user.Id, user.FullName, user.Email, user.Phone, user.IsLocked, user.Revision);
+
+    private async Task PublishProfileAsync(User user, long oldVersion, CancellationToken ct)
+    {
         // Publication is not atomic with persistence; republish repairs a failed delivery.
         if (user.Role == Roles.Teacher && user.ProfileVersion != oldVersion)
         {
@@ -116,7 +199,6 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
                     "Profile was saved, but teacher synchronization failed. Reload your profile and ask an administrator to republish.");
             }
         }
-        return Response(user, avatar);
     }
 
     private async Task<User> RequireActiveUserAsync(CancellationToken ct)
@@ -176,11 +258,12 @@ public sealed class IdentityService(IIdentityStore store, IPasswordService passw
         return new UserResponse(user.Id, user.Email, user.FullName, user.Role, user.Phone, user.StudentCode);
     }
 
-    private TokenResponse Issue(User user)
+    private TokenResponse Issue(User user, out RefreshSession session)
     {
         var response = tokens.Issue(user, clock.GetUtcNow());
         user.Touch();
-        store.AddSession(RefreshSession.Create(user.Id, tokens.HashRefreshToken(response.RefreshToken), response.RefreshTokenExpiresAt));
+        session = RefreshSession.Create(user.Id, tokens.HashRefreshToken(response.RefreshToken), response.RefreshTokenExpiresAt);
+        store.AddSession(session);
         return response;
     }
 

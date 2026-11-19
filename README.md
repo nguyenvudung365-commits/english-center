@@ -197,6 +197,8 @@ docker compose --env-file .env -f compose.yaml -f compose.web.yaml up -d --build
 docker compose --env-file .env -f compose.yaml -f compose.web.yaml ps
 ```
 
+**Hỗ trợ đăng nhập qua Zalo (tùy chọn):** Đặt `VITE_SUPPORT_ZALO_URL` trong file môi trường dùng bởi Compose (ví dụ `.env.demo` cho demo) hoặc trong `frontend/.env.local` khi chạy Vite trực tiếp, rồi build lại web hoặc khởi động lại Vite. Chỉ dùng link HTTPS đã được đồng ý công khai trên `zalo.me`, `oa.zalo.me` hoặc link QR cá nhân dạng `https://zaloapp.com/qr/p/<mã>`. Link QR dùng để mở ứng dụng trên điện thoại; trên máy tính có thể chỉ hiện trang chủ Zalo. Đây là biến lúc build: URL xuất hiện trong mã web và ở trang đăng nhập, không phải secret. Nếu không đặt hoặc URL không hợp lệ, trang chỉ hiển thị lời nhắc liên hệ giáo vụ; không có chức năng tự đặt lại mật khẩu. Image web đã build sẵn không đọc biến này lúc khởi động.
+
 - API health: `http://localhost:5080/health`; Compose chạy **Production nên không bật Swagger**.
 - Web: `http://127.0.0.1:8088`, proxy `/api/` nội bộ. VPS dùng Caddy/HTTPS đến cổng này; Cloudflare Full (strict). Có thể bỏ overlay `compose.web.yaml` khi chỉ cần backend.
 - PostgreSQL chỉ dùng mạng nội bộ Compose; API/web bind `127.0.0.1`. R2 là dịch vụ bên ngoài, không có container/cổng MinIO. Health không thay thế kiểm chứng upload-confirm-download.
@@ -241,7 +243,7 @@ Tại commit `1cddae3`, [CI của PR #8](https://github.com/nguyenvudung365-comm
 |---|---|---|
 | `POST` | `/api/identity/auth/login` | Không yêu cầu Bearer |
 | `POST` | `/api/identity/auth/refresh` | Refresh token hợp lệ |
-| `POST` | `/api/identity/auth/logout` | Bearer + refresh token thuộc người dùng |
+| `POST` | `/api/identity/auth/logout` | Bearer + refresh token thuộc người dùng (web: cookie, header `X-Session-Mode: cookie`) |
 | `POST` | `/api/identity/auth/change-password` | Bearer |
 | `POST` | `/api/identity/users` | `Staff` hoặc `Admin` |
 | `POST` | `/api/identity/users/republish` | `Admin` |

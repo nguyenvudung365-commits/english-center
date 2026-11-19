@@ -17,18 +17,20 @@ internal sealed class MonitoringStore(EnrollmentDbContext db) : IMonitoringStore
         }, ct);
 
     public Task<MonitoringResult> RecordAttendanceAsync(Guid session, Guid student, Guid classId, string status,
-        DateTime at, DateTime now, CancellationToken ct) => ChangeAsync(
+        DateTime at, int revision, DateTime now, CancellationToken ct) => ChangeAsync(
         db.Enrollments.Where(x => x.StudentId == student && x.ClassId == classId), now, async (x, token) =>
         {
             at = Precision(at);
             var previous = await db.AttendanceSnapshots.SingleOrDefaultAsync(y => y.SessionId == session && y.StudentId == student, token);
-            if (previous is null) db.AttendanceSnapshots.Add(new(session, student, x.Id, status, at));
+            if (previous is null) db.AttendanceSnapshots.Add(new(session, student, x.Id, status, at, revision));
             else
             {
                 if (previous.EnrollmentId != x.Id) throw new InvalidOperationException("Session/student belongs to another enrollment.");
-                if (at == previous.RecordedAt && status != previous.Status)
-                    throw new InvalidOperationException("Conflicting attendance at the same timestamp.");
-                if (at > previous.RecordedAt) previous.Set(status, at);
+                var order = revision == 0 && previous.Revision == 0
+                    ? at.CompareTo(previous.RecordedAt) : revision.CompareTo(previous.Revision);
+                if (order == 0 && status != previous.Status)
+                    throw new InvalidOperationException("Conflicting attendance for the same revision.");
+                if (order > 0) previous.Set(status, at, revision);
             }
         }, ct);
 

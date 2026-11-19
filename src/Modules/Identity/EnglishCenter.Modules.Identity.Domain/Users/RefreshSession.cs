@@ -13,5 +13,6 @@ public sealed class RefreshSession
         new() { Id = Guid.NewGuid(), UserId = userId, TokenHash = hash, ExpiresAt = expiresAt };
 
     public bool IsActive(DateTimeOffset now) => RevokedAt is null && ExpiresAt > now;
+    public void Rotate(string hash, DateTimeOffset expiresAt) => (TokenHash, ExpiresAt) = (hash, expiresAt);
     public void Revoke(DateTimeOffset now) => RevokedAt ??= now;
 }

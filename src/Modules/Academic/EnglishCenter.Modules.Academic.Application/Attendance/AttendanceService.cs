@@ -178,7 +178,7 @@ public sealed class AttendanceService(IAttendanceStore store, ISessionStore sess
     private Task PublishAsync(AttendanceRevision source, CancellationToken ct) => events.PublishAsync(
         new AttendanceRevisionRecordedIntegrationEvent(source.AttendanceId, source.SessionId, source.ClassId, source.StudentId,
             source.Status.ToString(), source.Revision, source.ChangedBy, DateTime.SpecifyKind(source.ChangedAtUtc, DateTimeKind.Utc)), ct, throwOnHandlerFailure: true);
-    private static bool InWindow(Session session, DateTime rawNow) => rawNow >= session.StartsAtUtc && rawNow <= session.EndsAtUtc.AddHours(24);
+    private static bool InWindow(Session session, DateTime rawNow) => !session.IsCancelled && rawNow >= session.StartsAtUtc && rawNow <= session.EndsAtUtc.AddHours(24);
     private static AttendanceStatus? ParseStatus(string? value, bool optional)
     {
         if (value is null && optional) return null;

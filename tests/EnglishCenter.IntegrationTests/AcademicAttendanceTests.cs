@@ -50,6 +50,25 @@ public sealed class AcademicAttendanceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CancelledSession_KeepsAttendanceHistoryAndPreventsWrites()
+    {
+        using var mark = await fixture.PutAsync("Present", null);
+        mark.EnsureSuccessStatusCode();
+        var id = (await AcademicScheduleFixture.JsonAsync(mark)).GetProperty("id").GetGuid();
+        var url = $"/api/academic/sessions/{fixture.Session}";
+        await fixture.AsAsync("staff");
+        var body = fixture.Host.Body(fixture.Host.Second, "2027-01-01T10:15:00Z", "2027-01-01T11:15:00Z");
+        body["expectedRevision"] = 0;
+        Assert.Equal(HttpStatusCode.Conflict, (await fixture.Client.PutAsJsonAsync(url, body)).StatusCode);
+        (await fixture.Client.PostAsJsonAsync(url + "/cancel", new { expectedRevision = 0 })).EnsureSuccessStatusCode();
+        await fixture.AsAsync("teacher");
+        Assert.Equal(HttpStatusCode.Forbidden, (await fixture.PutAsync("Late", 1)).StatusCode);
+        Assert.False((await fixture.ReadAsync(fixture.RosterUrl)).GetProperty("canWrite").GetBoolean());
+        var history = await fixture.ReadAsync($"/api/academic/attendance/{id}/history");
+        Assert.Equal(1, history.GetProperty("total").GetInt32());
+    }
+
+    [Fact]
     public async Task RosterUsesLiveUnprojectedEnrollmentAndMissingAttendanceIsNull()
     {
         var roster = await fixture.ReadAsync(fixture.RosterUrl);

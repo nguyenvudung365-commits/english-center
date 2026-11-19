@@ -603,6 +603,10 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("description");
 
+                    b.Property<bool>("IsRetired")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_retired");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -622,6 +626,7 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                             Id = new Guid("34d802e7-5319-446a-9104-c6ff10cd6a00"),
                             Code = "IELTS-FOUNDATION",
                             Description = "Nền tảng 4 kỹ năng, mục tiêu band 4.0-4.5",
+                            IsRetired = false,
                             Name = "IELTS Foundation"
                         },
                         new
@@ -629,6 +634,7 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                             Id = new Guid("1ae06bfd-eed6-476b-b63d-ef71138ee3b0"),
                             Code = "IELTS-INTERMEDIATE",
                             Description = "Mục tiêu band 5.0-5.5",
+                            IsRetired = false,
                             Name = "IELTS Intermediate"
                         },
                         new
@@ -636,6 +642,7 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                             Id = new Guid("3dd0ae5a-0547-42dc-b834-9f4b0d502752"),
                             Code = "IELTS-ADVANCED",
                             Description = "Mục tiêu band 6.5 trở lên",
+                            IsRetired = false,
                             Name = "IELTS Advanced"
                         });
                 });
@@ -727,11 +734,19 @@ namespace EnglishCenter.Modules.Academic.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("exam_slot");
 
+                    b.Property<bool>("IsCancelled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_cancelled");
+
                     b.Property<string>("Lesson")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("lesson");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer")
+                        .HasColumnName("revision");
 
                     b.Property<string>("SessionType")
                         .IsRequired()

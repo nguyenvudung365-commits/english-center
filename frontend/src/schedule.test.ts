@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, setSession } from "./api";
 import {
     calendarRange,
+    cancelSession,
     centerDate,
     createSession,
     getScheduledSession,
     listSessions,
     navigateCalendar,
+    saveSession,
     sessionsForDay,
     validateSessionDraft,
     vietnamLocalToUtc,
@@ -23,6 +25,7 @@ const item: ScheduledSession = {
     sessionType: "Regular", examSlot: null,
     startsAtUtc: "2027-01-01T16:30:00Z", endsAtUtc: "2027-01-01T17:30:00Z",
     createdAtUtc: "2026-11-13T00:00:00Z",
+    revision: 0, isCancelled: false,
 };
 const draft = (changes: Partial<SessionDraft> = {}): SessionDraft => ({
     classId, unit: " Unit 1 ", lesson: " Bài học ", skills: ["Speaking", "Listening"],
@@ -122,6 +125,20 @@ describe("Session draft validation and HTTP contract", () => {
         expect(init?.method ?? "GET").toBe("GET");
         expect(init?.body).toBeUndefined();
         expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer schedule-access");
+    });
+
+    it("sends revision on update/cancel and preserves original precision on text-only edits", async () => {
+        const existing = { ...item, startsAtUtc: "2027-01-01T16:30:00.123456Z", revision: 2 };
+        fetcher.mockResolvedValueOnce(json(existing)).mockResolvedValueOnce(json({ ...existing, isCancelled: true }));
+        await saveSession(draft(), existing);
+        await cancelSession(existing);
+        const [[update, put], [cancel, post]] = fetcher.mock.calls;
+        expect(update).toBe(`/api/academic/sessions/${id}`);
+        expect(put?.method).toBe("PUT");
+        expect(JSON.parse(String(put?.body))).toMatchObject({ expectedRevision: 2, startsAtUtc: existing.startsAtUtc });
+        expect(cancel).toBe(`/api/academic/sessions/${id}/cancel`);
+        expect(post?.method).toBe("POST");
+        expect(JSON.parse(String(post?.body))).toEqual({ expectedRevision: 2 });
     });
 
     it("encodes explicit offset range bounds and class filter without changing their meaning", async () => {

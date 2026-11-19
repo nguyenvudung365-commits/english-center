@@ -89,11 +89,12 @@ public sealed class EndpointAuthorizationTests
     [Theory]
     [InlineData("EnglishCenter.Modules.Identity.Api.Controllers.AuthController", "Login", true)]
     [InlineData("EnglishCenter.Modules.Identity.Api.Controllers.AuthController", "Refresh", true)]
-    [InlineData("EnglishCenter.Modules.Identity.Api.Controllers.AuthController", "Logout", false)]
+    // Cookie logout verifies the refresh credential; legacy bearer enforcement is covered by IdentityCookieSessionTests.
+    [InlineData("EnglishCenter.Modules.Identity.Api.Controllers.AuthController", "Logout", true)]
     [InlineData("EnglishCenter.Modules.Identity.Api.Controllers.AuthController", "ChangePassword", false)]
     [InlineData("EnglishCenter.Modules.Identity.Api.Controllers.UsersController", "Create", false)]
     [InlineData("EnglishCenter.Modules.Identity.Api.Controllers.UsersController", "Republish", false)]
-    public void IdentityMatrix_AnonymousOnlyForLoginAndRefresh(string controllerName, string actionName, bool anonymous)
+    public void IdentityMatrix_AnonymousOnlyForSessionEndpoints(string controllerName, string actionName, bool anonymous)
     {
         var controller = Controllers().Single(c => c.FullName == controllerName);
         var action = controller.GetMethod(actionName)!;

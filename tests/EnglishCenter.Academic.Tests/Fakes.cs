@@ -44,6 +44,8 @@ internal sealed class FakeAcademicStore : IAcademicStore
     }
     public Task<IReadOnlyList<Teacher>> TeachersAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<Teacher>>(Teachers);
     public void AddClass(Class academicClass) => _pendingClasses.Add(academicClass);
+    public Task SaveNewClassAsync(Class academicClass, CancellationToken ct) { AddClass(academicClass); return SaveAsync(ct); }
+    public void AddCourse(Course course) => Courses.Add(course);
     public void AddTeacher(Teacher teacher) => _pendingTeachers.Add(teacher);
 
     public Task SaveAsync(CancellationToken ct)
