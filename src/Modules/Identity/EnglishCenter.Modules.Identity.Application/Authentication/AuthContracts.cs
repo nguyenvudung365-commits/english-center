@@ -35,6 +35,9 @@ public interface IIdentityStore
 {
     Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken ct);
     Task<User?> FindUserAsync(Guid id, CancellationToken ct);
+    Task<bool> IsActiveInRoleAsync(Guid id, string? expectedRole, CancellationToken ct);
+    // Một truy vấn cho cả lô; chỉ trả tên, id không tồn tại thì vắng mặt.
+    Task<IReadOnlyDictionary<Guid, string>> FullNamesAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct);
     Task<RefreshSession?> FindSessionAsync(string hash, CancellationToken ct);
     Task<IReadOnlyList<RefreshSession>> SessionsAsync(Guid userId, CancellationToken ct);
     Task<IReadOnlyList<User>> UsersAsync(string? role, CancellationToken ct);

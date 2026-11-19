@@ -10,6 +10,11 @@ internal sealed class IdentityStore(IdentityDbContext db) : IIdentityStore
     public Task<User?> FindByEmailAsync(string email, CancellationToken ct) =>
         db.Users.SingleOrDefaultAsync(x => x.NormalizedEmail == email, ct);
     public Task<User?> FindUserAsync(Guid id, CancellationToken ct) => db.Users.SingleOrDefaultAsync(x => x.Id == id, ct);
+    public Task<bool> IsActiveInRoleAsync(Guid id, string? expectedRole, CancellationToken ct) =>
+        db.Users.AnyAsync(x => x.Id == id && !x.IsLocked && x.Role == expectedRole, ct);
+    public async Task<IReadOnlyDictionary<Guid, string>> FullNamesAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct) =>
+        ids.Count == 0 ? new Dictionary<Guid, string>()
+            : await db.Users.AsNoTracking().Where(x => ids.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.FullName, ct);
     public Task<RefreshSession?> FindSessionAsync(string hash, CancellationToken ct) =>
         db.RefreshSessions.SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
     public async Task<IReadOnlyList<RefreshSession>> SessionsAsync(Guid userId, CancellationToken ct) =>

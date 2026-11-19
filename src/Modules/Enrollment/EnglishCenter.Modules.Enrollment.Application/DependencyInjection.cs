@@ -14,6 +14,7 @@ public static class DependencyInjection
     public static IServiceCollection AddEnrollmentApplication(this IServiceCollection services)
     {
         services.AddScoped<Enrollments.EnrollmentService>();
+        services.AddScoped<EnglishCenter.Modules.Enrollment.Contracts.IEnrollmentRoster, Enrollments.EnrollmentRoster>();
         services.AddScoped<EnglishCenter.Modules.Enrollment.Contracts.IEnrollmentAccess>(sp => sp.GetRequiredService<Enrollments.EnrollmentService>());
         services.AddScoped<EnrollmentService>();
         services.AddScoped<MonitoringService>();
