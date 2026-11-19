@@ -38,19 +38,25 @@ Không có quyền lớp → 403 (giữ hành vi các endpoint bài tập đã c
 
 | Method & route | Vai trò | Ghi chú |
 |---|---|---|
-| `POST /api/academic/assignments` | Teacher lớp, Staff, Admin | Body: `classId, title, description?, opensAtUtc, closesAtUtc, kind?, unit?, lesson?, sessionId?, publish?`. `publish` bỏ trống/`true` = công bố ngay (giữ tương thích frontend hiện tại); `false` = lưu nháp. 201 |
+| `POST /api/academic/assignments` | Teacher lớp, Staff, Admin | Body: `classId, title, description?, opensAtUtc, closesAtUtc, kind?, unit?, lesson?, sessionId?, publish?`. `publish` bỏ trống/`true` = công bố ngay (khi đó **bắt buộc `sessionId`**, thiếu → 409); `false` = lưu nháp (chưa cần buổi). 201 |
 | `GET /api/academic/assignments?classId=&search=&status=&kind=` | Mọi vai trò có quyền lớp | Mảng tối đa 200 bài. Học viên không thấy nháp. `search` tìm trong tiêu đề/Unit/Lesson |
 | `GET /api/academic/assignments/{id}` | Như trên | |
 | `PUT /api/academic/assignments/{id}` | Teacher lớp, Staff, Admin | Body: `title, description?, opensAtUtc, closesAtUtc, kind?, unit?, lesson?, sessionId?, expectedVersion` (bắt buộc). Bài đã công bố/legacy chỉ được sửa tiêu đề/mô tả/Unit/Lesson; đổi loại/buổi/thời hạn → 409. `kind`/`sessionId` bỏ trống = giữ nguyên |
 | `POST /api/academic/assignments/{id}/publish` | Teacher lớp, Staff, Admin | Body tùy chọn `{ "expectedVersion": 1 }`. Chụp snapshot học viên đang có quyền lớp làm danh sách nghĩa vụ (Q-07) trong cùng transaction rồi phát `AssignmentPublished`. Gọi lại khi đã công bố trả 200, không tạo snapshot/event mới |
-| `GET /api/academic/assignments/{id}/recipients` | Teacher lớp, Staff, Admin | Trạng thái từng học viên: `outcome` = `Pending` / `Submitted` / `Missed` / `Exempted`, hoặc `NotObligated` (vào lớp sau khi công bố nhưng vẫn nộp) |
-| `GET /api/academic/assignments/{id}/submissions?graded=` | Teacher lớp, Staff, Admin | Mảng bài nộp (giữ dạng cũ) + `score, feedback, gradeVersion, gradedAt, gradedBy` |
+| `GET /api/academic/assignments/{id}/recipients` | Teacher lớp, Staff, Admin | Trạng thái từng học viên: `outcome` = `Pending` / `Submitted` / `Missed` / `Exempted`, hoặc `NotObligated` (vào lớp sau khi công bố nhưng vẫn nộp). Kèm `studentName, studentCode` |
+| `GET /api/academic/assignments/{id}/submissions?graded=` | Teacher lớp, Staff, Admin | Mảng bài nộp (giữ dạng cũ) + `score, feedback, gradeVersion, gradedAt, gradedBy` + `studentName, studentCode` (lấy từ `IStudentDisplayDirectory` của Identity; `null` khi tài khoản bị khóa/không còn là học viên → frontend hiện ID) |
+| `GET /api/academic/assignments/missed-preview` | Staff, Admin | Đối soát **chỉ đọc** trước khi bật `ResolveMissed` (mục 7): với các bài đã quá hạn mà chưa chốt, trả số `pending, submitted, exempted` và danh sách `missed` (kèm tên) nếu chốt ngay lúc này. Không ghi gì, không phát event. Tối đa 100 bài/lần (`hasMore`) |
 | `PUT /api/academic/assignments/{id}/submissions` | Student | Nộp 1–5 file (giữ nguyên quy tắc file/revision cũ). Bài đã chấm không thay file (409) |
 | `GET /api/academic/assignments/{id}/submissions/mine` | Student | Bài nộp của mình, có điểm khi đã chấm |
 | `POST /api/academic/assignments/{id}/events/replay` | Staff, Admin | Phát lại event đã lưu với cùng khóa (đối soát consumer). Trả `{ published, graded, missed }`; có log audit người thao tác. Consumer còn lỗi → **503**, sửa consumer rồi gọi lại (an toàn vì cùng khóa) |
 
-**Buổi học (Session, TV1):** chưa có module Session trên develop nên server hiện **từ chối `sessionId` (409)** thay vì lưu tham chiếu chưa kiểm chứng, và cho công bố không cần buổi.
-Khi TV1 đăng ký bản triển khai `ISessionCatalog` thật (`IsAvailable = true`), server tự động: kiểm tra buổi cùng lớp, lấy Unit/Lesson mặc định từ buổi, và **bắt buộc gán buổi trước khi công bố** (AC-05). Lúc đó frontend nên gửi `publish: false` khi tạo rồi công bố sau khi chọn buổi.
+**Buổi học (Session, TV1):** `ISessionCatalog` đọc bảng buổi học thật của TV1 (US-08). Server:
+- kiểm tra `sessionId` tồn tại và thuộc **đúng lớp** của bài (sai → 400, lỗi trường `sessionId`);
+- lấy Unit/Lesson mặc định từ buổi nếu để trống (nhập tay thì giữ nguyên); Unit tối đa 100 ký tự, Lesson tối đa 200 ký tự;
+- **bắt buộc gắn buổi trước khi công bố** (AC-05): tạo với `publish` mặc định mà thiếu buổi → 409 và không lưu; nháp chưa gắn buổi gọi `POST …/publish` → 409. Sửa nháp với `sessionId` rồi công bố lại;
+- bài đã công bố không đổi sang buổi khác (409). Bài cũ đã công bố trước khi bật không bị ảnh hưởng.
+
+Frontend: ô “Buổi học” bắt buộc khi công bố ngay, không bắt buộc khi “Lưu nháp”. Chọn ngày trong biểu mẫu để tìm buổi ở tháng khác; đổi ngày tìm không bỏ buổi đã chọn. Trang chi tiết hiện Unit/Lesson và giờ của buổi đã gắn.
 
 ## 3. Chấm điểm (US-21)
 
@@ -133,7 +139,13 @@ Truy vấn (Academic.Contracts):
 1. Luôn phát lại `AssignmentPublished`/`SubmissionGraded` đã commit nhưng chưa đánh dấu gửi (crash giữa commit và publish, hoặc handler lỗi), sau 30 giây chờ request tự phát. Event nào có handler lỗi thì không đánh dấu đã gửi và được thử lại ở vòng sau; các event khác trong cùng vòng vẫn được xử lý. Kết quả mỗi vòng có `DeliveryFailed` (số event có handler lỗi).
 2. Chỉ khi `Academic:Coursework:ResolveMissed=true` (**mặc định tắt**): với bài đã công bố và quá hạn, chốt từng học viên trong snapshot: có bài nộp trước hạn → `Submitted`; mất quyền lớp → `Exempted`; còn lại → `Missed` và phát `AssignmentMissed`. Trạng thái cuối không mở lại; chạy lại không phát thêm. Worker đối chiếu **toàn bộ** bài nộp của bài tập (không giới hạn 200 dòng), nên lớp đông bao nhiêu người cũng không bị tính nhầm là bỏ bài.
 
-Tắt toàn bộ worker: `Academic:Coursework:WorkerEnabled=false`. Theo kế hoạch, chỉ bật `ResolveMissed` sau khi đối soát dữ liệu staging.
+Tắt toàn bộ worker: `Academic:Coursework:WorkerEnabled=false`.
+
+**Bật `ResolveMissed` (cờ nghiệp vụ, chỉ bật sau khi đối soát dữ liệu staging):**
+1. Triển khai bản này lên staging với cờ **tắt** (mặc định).
+2. Đăng nhập Staff/Admin, gọi `GET /api/academic/assignments/missed-preview`. Với từng bài, đối chiếu danh sách `missed` với thực tế (học viên đã nộp ngoài hệ thống? quyền lớp chưa đồng bộ từ TV3? bài cũ gắn sai hạn?). Sửa dữ liệu nguồn trước — kết quả sau khi chốt **không mở lại**.
+3. Khi danh sách đúng, đặt `ACADEMIC_RESOLVE_MISSED=true` trong file env deploy (credential `english-center-deploy-env` của Jenkins; `compose.yaml` map sang `Academic__Coursework__ResolveMissed`) rồi deploy lại. Worker sẽ chốt đúng như bản đối soát và phát `AssignmentMissed` cho TV3.
+4. Tắt lại bằng cách đặt `false`: các bài đã chốt giữ nguyên, bài chưa chốt chờ lần bật sau.
 
 ## 8. Giới hạn đã biết
 

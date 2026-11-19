@@ -1,6 +1,7 @@
 using EnglishCenter.Modules.Academic.Application.Abstractions;
 using EnglishCenter.Modules.Academic.Contracts.IntegrationEvents;
 using EnglishCenter.Modules.Academic.Domain.Assignments;
+using EnglishCenter.Modules.Identity.Contracts;
 using Microsoft.Extensions.Logging;
 
 namespace EnglishCenter.Modules.Academic.Application.Assignments;
@@ -11,7 +12,7 @@ namespace EnglishCenter.Modules.Academic.Application.Assignments;
 /// Điểm chỉ được ghi khi khớp cả gradeVersion lẫn revision bài nộp giáo viên đã mở, để không gán điểm cho file chưa xem.
 /// </summary>
 public sealed class GradingService(IAssignmentStore store, IAcademicStore classes, CourseworkAccess access, TimeProvider clock,
-    CourseworkEvents events, ILogger<GradingService> log)
+    CourseworkEvents events, IStudentDisplayDirectory students, ILogger<GradingService> log)
 {
     public async Task<SubmissionResponse> GradeAsync(Guid submissionId, GradeSubmissionRequest request, CancellationToken ct)
     {
@@ -36,7 +37,7 @@ public sealed class GradingService(IAssignmentStore store, IAcademicStore classe
         var expected = request.ExpectedGradeVersion!.Value;
         // Retry đúng nội dung sau khi mất response: trả kết quả đã lưu, không thêm lịch sử/event.
         // An toàn khi đặt trước kiểm tra revision: bài đã chấm thì học viên không thay file được nữa.
-        if (submission.IsSameGrade(value, request.Feedback, userId, expected)) return AssignmentService.Response(submission);
+        if (submission.IsSameGrade(value, request.Feedback, userId, expected)) return await NamedAsync(submission, ct);
 
         SubmissionGrade grade;
         try { grade = submission.Grade(value, request.Feedback, userId, expected, request.ExpectedRevision!.Value, clock.GetUtcNow()); }
@@ -57,8 +58,13 @@ public sealed class GradingService(IAssignmentStore store, IAcademicStore classe
             try { await store.SaveAsync(ct); }
             catch (AcademicFailure ex) { log.LogWarning(ex, "Could not mark SubmissionGraded {SubmissionId} v{Version} as sent", submission.Id, grade.Version); }
         }
-        return AssignmentService.Response(submission);
+        return await NamedAsync(submission, ct);
     }
+
+    // Giữ tên học viên trong kết quả chấm để màn hình giáo viên không quay về hiển thị ID sau khi lưu điểm.
+    private async Task<SubmissionResponse> NamedAsync(Submission submission, CancellationToken ct) =>
+        AssignmentService.Named(AssignmentService.Response(submission),
+            await AssignmentService.StudentNamesAsync(students, [submission.StudentId], ct));
 
     public async Task<IReadOnlyList<GradeHistoryResponse>> HistoryAsync(Guid submissionId, CancellationToken ct)
     {

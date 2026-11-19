@@ -21,7 +21,7 @@ public sealed class Assignment
     public const int TitleMaxLength = 200;
     public const int DescriptionMaxLength = 5000;
     public const int UnitMaxLength = 100;
-    public const int LessonMaxLength = 100;
+    public const int LessonMaxLength = Sessions.Session.LessonMaxLength;
 
     private Assignment() { }
     public Guid Id { get; private set; }

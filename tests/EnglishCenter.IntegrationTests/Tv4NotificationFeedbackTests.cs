@@ -267,8 +267,10 @@ public sealed class Tv4NotificationFeedbackTests : IAsyncLifetime
         await Enroll("student");
         await As("teacher");
         var now = DateTimeOffset.UtcNow;
+        // AC-05 (TV2): bài phải gắn buổi học của lớp trước khi công bố.
+        var session = await CourseworkSessions.SeedAsync(factory.Services, classId);
         var created = await Expect(HttpStatusCode.Created, HttpMethod.Post, "/api/academic/assignments", new
-        { classId, title = "TV4 homework", description = "x", opensAtUtc = now.AddHours(-1), closesAtUtc = now.AddHours(2) });
+        { classId, title = "TV4 homework", description = "x", opensAtUtc = now.AddHours(-1), closesAtUtc = now.AddHours(2), sessionId = session });
         var assignment = (await Json(created)).GetProperty("id").GetGuid();
 
         async Task<List<JsonElement>> Published(string name)

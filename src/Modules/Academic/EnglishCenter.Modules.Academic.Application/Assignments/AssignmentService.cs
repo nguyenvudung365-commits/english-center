@@ -1,13 +1,15 @@
 using EnglishCenter.Modules.Academic.Application.Abstractions;
 using EnglishCenter.Modules.Academic.Contracts.IntegrationEvents;
 using EnglishCenter.Modules.Academic.Domain.Assignments;
+using EnglishCenter.Modules.Identity.Contracts;
 using EnglishCenter.Modules.MediaNotification.Contracts;
 using Microsoft.Extensions.Logging;
 
 namespace EnglishCenter.Modules.Academic.Application.Assignments;
 
 public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess access, ISubmissionFileAccess media,
-    TimeProvider clock, SubmissionLimits limits, ISessionCatalog sessions, CourseworkEvents events, ILogger<AssignmentService> log)
+    TimeProvider clock, SubmissionLimits limits, ISessionCatalog sessions, CourseworkEvents events, IStudentDisplayDirectory students,
+    CourseworkReconciler reconciler, ILogger<AssignmentService> log)
 {
     private static readonly string[] SubmissionStatuses = ["NotSubmitted", "Submitted", "Graded", "Missed", "Exempted"];
 
@@ -86,7 +88,8 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
     // Công bố + snapshot roster active trong CÙNG transaction (Q-07). Trả số người có nghĩa vụ.
     private async Task<int> PublishCoreAsync(Assignment item, Guid userId, DateTimeOffset now, CancellationToken ct)
     {
-        if (sessions.IsAvailable && item.SessionId is null)
+        // AC-05: bài phải gắn một buổi học của lớp trước khi học viên thấy.
+        if (item.SessionId is null)
             throw new AcademicFailure(409, "Assign a class session before publishing.");
         item.Publish(userId, now);
         var count = 0;
@@ -188,9 +191,9 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
     {
         var assignment = await FindAsync(assignmentId, ct);
         await access.AuthorizeAsync(assignment.ClassId, CourseworkClassAccess.Manage, ct);
-        return (await store.SubmissionsAsync(assignmentId, ct))
-            .Where(x => graded is null || (x.GradeVersion > 0) == graded)
-            .Select(Response).ToList();
+        var items = (await store.SubmissionsAsync(assignmentId, ct)).Where(x => graded is null || (x.GradeVersion > 0) == graded).ToList();
+        var names = await StudentNamesAsync(students, items.Select(x => x.StudentId), ct);
+        return items.Select(x => Named(Response(x), names)).ToList();
     }
 
     // US-19/20: trạng thái nộp của từng học viên trong snapshot công bố (và cả người nộp dù vào lớp sau).
@@ -201,17 +204,43 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
         // Đủ mọi bài nộp (không cắt 200) để khớp với snapshot người nhận, vốn không giới hạn.
         var submissions = (await store.AllSubmissionsAsync(assignmentId, ct)).ToDictionary(x => x.StudentId);
         var recipients = await store.RecipientsAsync(assignmentId, ct);
+        var names = await StudentNamesAsync(students, recipients.Select(x => x.StudentId).Concat(submissions.Keys), ct);
         var result = recipients.Select(x =>
         {
             submissions.TryGetValue(x.StudentId, out var s);
+            names.TryGetValue(x.StudentId, out var name);
             return new RecipientResponse(x.StudentId, x.AssignedAt, x.Outcome.ToString(), SubmissionStatus(s, x), s?.Id,
-                s?.SubmittedAt, s?.Score, s?.GradeVersion ?? 0);
+                s?.SubmittedAt, s?.Score, s?.GradeVersion ?? 0, name?.FullName, name?.StudentCode);
         }).ToList();
         var obligated = recipients.Select(x => x.StudentId).ToHashSet();
         result.AddRange(submissions.Values.Where(x => !obligated.Contains(x.StudentId)).Select(s =>
-            new RecipientResponse(s.StudentId, s.SubmittedAt, "NotObligated", SubmissionStatus(s, null), s.Id, s.SubmittedAt,
-                s.Score, s.GradeVersion)));
+        {
+            names.TryGetValue(s.StudentId, out var name);
+            return new RecipientResponse(s.StudentId, s.SubmittedAt, "NotObligated", SubmissionStatus(s, null), s.Id, s.SubmittedAt,
+                s.Score, s.GradeVersion, name?.FullName, name?.StudentCode);
+        }));
         return result.OrderBy(x => x.StudentId).ToList();
+    }
+
+    /// <summary>
+    /// Staff/Admin đối soát trước khi bật Academic:Coursework:ResolveMissed: tính trước ai sẽ bị chốt Missed/Exempted/Submitted
+    /// cho các bài đã quá hạn mà chưa chốt. Chỉ đọc: không ghi kết quả, không phát event.
+    /// </summary>
+    public async Task<MissedPreviewResponse> PreviewMissedAsync(CancellationToken ct)
+    {
+        await access.EnsureActiveAsync(ct);
+        if (!access.IsManager) throw new AcademicFailure(403, "Only staff reconcile coursework obligations.");
+        const int max = 100;
+        var preview = await reconciler.PreviewAsync(max, ct);
+        var names = await StudentNamesAsync(students, preview.SelectMany(x => x.MissedStudentIds), ct);
+        var items = preview.Select(x => new MissedPreviewAssignment(x.AssignmentId, x.ClassId, x.Title, x.ClosesAtUtc, x.Pending,
+            x.Submitted, x.Exempted, x.MissedStudentIds.Select(id =>
+            {
+                names.TryGetValue(id, out var name);
+                return new MissedPreviewStudent(id, name?.FullName, name?.StudentCode);
+            }).ToList())).ToList();
+        return new(clock.GetUtcNow(), items.Count, items.Sum(x => x.Submitted), items.Sum(x => x.Missed.Count),
+            items.Sum(x => x.Exempted), items.Count == max, items);
     }
 
     // US-22: học viên xem bài/điểm của mình qua mọi lớp còn quyền, có lọc/tìm kiếm/phân trang.
@@ -319,8 +348,6 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
     {
         if (sessionId is null) return (unit, lesson);
         if (sessionId == Guid.Empty) throw new AcademicFailure(400, "Invalid session.", Errors("sessionId", "SessionId không hợp lệ."));
-        if (!sessions.IsAvailable)
-            throw new AcademicFailure(409, "Class sessions are not available yet; save the assignment without sessionId.");
         var session = await sessions.FindAsync(sessionId.Value, ct);
         if (session is null || session.ClassId != classId)
             throw new AcademicFailure(400, "Session must belong to the same class.", Errors("sessionId", "Buổi học không thuộc lớp này."));
@@ -330,7 +357,7 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
     private static void CheckLabels(string? unit, string? lesson)
     {
         if (unit?.Trim().Length > Assignment.UnitMaxLength || lesson?.Trim().Length > Assignment.LessonMaxLength)
-            throw new AcademicFailure(400, "Unit and lesson must not exceed 100 characters.");
+            throw new AcademicFailure(400, $"Unit must not exceed {Assignment.UnitMaxLength} characters and lesson must not exceed {Assignment.LessonMaxLength} characters.");
     }
 
     private static AssignmentKind? ParseKind(string? value) =>
@@ -356,6 +383,20 @@ public sealed class AssignmentService(IAssignmentStore store, CourseworkAccess a
         : "NotSubmitted";
 
     internal static Dictionary<string, string[]> Errors(string field, string message) => new() { [field] = [message] };
+
+    // Tên hiển thị từ contract của Identity; học viên bị khóa/không còn tồn tại thì vắng mặt (frontend hiện ID).
+    internal static async Task<IReadOnlyDictionary<Guid, StudentDisplay>> StudentNamesAsync(IStudentDisplayDirectory students,
+        IEnumerable<Guid> ids, CancellationToken ct)
+    {
+        var distinct = ids.Distinct().ToList();
+        return distinct.Count == 0 ? new Dictionary<Guid, StudentDisplay>()
+            : (await students.FindActiveAsync(distinct, ct)).ToDictionary(x => x.StudentId);
+    }
+
+    internal static SubmissionResponse Named(SubmissionResponse response, IReadOnlyDictionary<Guid, StudentDisplay> names) =>
+        names.TryGetValue(response.StudentId, out var name)
+            ? response with { StudentName = name.FullName, StudentCode = name.StudentCode }
+            : response;
 
     internal static AssignmentResponse Response(Assignment item, DateTimeOffset now) => new(item.Id, item.ClassId, item.Title,
         item.Description, item.OpensAtUtc, item.ClosesAtUtc, item.Kind.ToString(), item.Unit, item.Lesson, item.SessionId,

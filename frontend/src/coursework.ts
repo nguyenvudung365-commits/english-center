@@ -6,7 +6,8 @@ import type { Assignment, Submission } from "./submissions";
 // Hằng số khớp giới hạn máy chủ (Assignment/Submission/PracticeExercise).
 export const ASSIGNMENT_TITLE_MAX = 200;
 export const ASSIGNMENT_DESCRIPTION_MAX = 5000;
-export const ASSIGNMENT_LABEL_MAX = 100;
+export const ASSIGNMENT_UNIT_MAX = 100;
+export const ASSIGNMENT_LESSON_MAX = 200;
 export const FEEDBACK_MAX = 2000;
 export const PRACTICE_TITLE_MAX = 200;
 export const PRACTICE_CONTENT_MAX = 20000;
@@ -63,12 +64,13 @@ export const emptyAssignmentDraft = (): AssignmentDraft => ({
     title: "", description: "", kind: "Homework", unit: "", lesson: "", opensLocal: "", closesLocal: "", sessionId: "", saveAsDraft: false,
 });
 // `locked`: bài đã công bố, giữ nguyên hạn/loại nên không kiểm tra các trường đó.
-export function validateAssignmentDraft(draft: AssignmentDraft, locked = false): Record<string, string[]> {
+// `publishing`: tạo và công bố ngay — máy chủ bắt buộc gắn buổi học của lớp trước khi công bố (AC-05).
+export function validateAssignmentDraft(draft: AssignmentDraft, locked = false, publishing = false): Record<string, string[]> {
     const errors: Record<string, string[]> = {};
     if (!draft.title.trim() || draft.title.trim().length > ASSIGNMENT_TITLE_MAX) errors.title = [`Tiêu đề bắt buộc, tối đa ${ASSIGNMENT_TITLE_MAX} ký tự.`];
     if (draft.description.length > ASSIGNMENT_DESCRIPTION_MAX) errors.description = [`Hướng dẫn tối đa ${ASSIGNMENT_DESCRIPTION_MAX} ký tự.`];
-    if (draft.unit.trim().length > ASSIGNMENT_LABEL_MAX) errors.unit = [`Unit tối đa ${ASSIGNMENT_LABEL_MAX} ký tự.`];
-    if (draft.lesson.trim().length > ASSIGNMENT_LABEL_MAX) errors.lesson = [`Lesson tối đa ${ASSIGNMENT_LABEL_MAX} ký tự.`];
+    if (draft.unit.trim().length > ASSIGNMENT_UNIT_MAX) errors.unit = [`Unit tối đa ${ASSIGNMENT_UNIT_MAX} ký tự.`];
+    if (draft.lesson.trim().length > ASSIGNMENT_LESSON_MAX) errors.lesson = [`Lesson tối đa ${ASSIGNMENT_LESSON_MAX} ký tự.`];
     if (!locked) {
         if (!(assignmentKinds as readonly string[]).includes(draft.kind)) errors.kind = ["Chọn Trên lớp hoặc Về nhà."];
         const opens = vnLocalToIso(draft.opensLocal);
@@ -77,7 +79,15 @@ export function validateAssignmentDraft(draft: AssignmentDraft, locked = false):
         if (!closes) errors.closesLocal = ["Nhập giờ đóng hợp lệ (giờ Việt Nam)."];
         else if (opens && Date.parse(closes) <= Date.parse(opens)) errors.closesLocal = ["Giờ đóng phải sau giờ mở."];
     }
+    if (publishing && !draft.sessionId) errors.sessionId = ["Chọn buổi học của lớp trước khi công bố, hoặc chọn “Lưu nháp”."];
     return errors;
+}
+
+// Tên học viên ở màn hình giáo viên (kèm mã học viên nếu có); null khi máy chủ không trả tên để giao diện hiện ID.
+export function studentLabel(submission: Pick<Submission, "studentName" | "studentCode">): string | null {
+    const name = submission.studentName?.trim();
+    if (!name) return null;
+    return submission.studentCode ? `${name} (${submission.studentCode})` : name;
 }
 
 export type PracticeDraft = { title: string; content: string };
