@@ -32,7 +32,9 @@ function EnrollmentList() {
                             <th scope="col">Học phí</th><th scope="col">Trạng thái ghi danh</th><th scope="col">Quyền học tập</th>
                         </tr></thead>
                         <tbody>{data.items.map(item => <tr key={item.id}>
-                            <th scope="row"><Link className="accent" to={`/classes/${item.classId}`}>{item.classCode}</Link></th>
+                            <th scope="row">{item.isActive
+                                ? <Link className="accent" to={`/classes/${item.classId}`}>{item.classCode}</Link>
+                                : item.classCode}</th>
                             <td>{formatDateOnly(item.startDate)} – {formatDateOnly(item.endDate)}</td>
                             <td>{formatVnDateTime(item.enrolledAtUtc)}</td>
                             <td>{formatVnd(item.tuitionFee)}</td>
