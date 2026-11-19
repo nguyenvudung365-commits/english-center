@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { api, ApiError, getSession, getSessionGeneration, identity } from "./api";
 import { canManageAcademic, isAcademicId } from "./academic";
 import { useRead as useLoad } from "./academic-pages";
+import { MyEnrollments } from "./enrollment-pages";
 import { allVisibleClasses, ReadFeedback } from "./attendance-pages";
 import {
     assignmentKindLabel, assignmentKinds, assignmentKindLabels, assignmentStatuses, assignmentStatusLabel, assignmentStatusLabels,
@@ -511,6 +512,13 @@ function SubmissionAttachments({ submission }: { submission: Submission }) {
 
 type Enrollment = { id: string; classId: string; studentId: string; isActive: boolean };
 export function Enrollments() {
+    const user = identity(getSession());
+    if (!user) return null;
+    if (user.role === "Student") return <MyEnrollments />;
+    return <ManageEnrollments />;
+}
+
+function ManageEnrollments() {
     const [classId, setClassId] = useState(""); const [studentId, setStudentId] = useState("");
     const [items, setItems] = useState<Enrollment[] | null>(null); const [loadedClass, setLoadedClass] = useState("");
     const [notice, setNotice] = useState("");

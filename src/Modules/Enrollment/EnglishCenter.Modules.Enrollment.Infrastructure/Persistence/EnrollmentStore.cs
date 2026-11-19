@@ -1,4 +1,5 @@
 using EnglishCenter.Modules.Enrollment.Application.Registrations;
+using EnglishCenter.Modules.Enrollment.Application.Monitoring;
 using EnglishCenter.Modules.Enrollment.Domain.Registrations;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -43,6 +44,21 @@ internal sealed class EnrollmentStore(EnrollmentDbContext db) : IEnrollmentStore
     }
 
     public Task<Registration?> FindAsync(Guid id, CancellationToken ct) => db.Enrollments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+
+    public async Task<PageResult<MyEnrollmentResponse>> ListMineAsync(Guid studentId, int page, int size, CancellationToken ct)
+    {
+        var query = from enrollment in db.Enrollments.AsNoTracking()
+                    join snapshot in db.Classes.AsNoTracking() on enrollment.ClassId equals snapshot.ClassId
+                    where enrollment.StudentId == studentId
+                    select new { Enrollment = enrollment, Class = snapshot };
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderByDescending(x => x.Enrollment.EnrolledAt).ThenBy(x => x.Enrollment.Id)
+            .Skip((page - 1) * size).Take(size)
+            .Select(x => new MyEnrollmentResponse(x.Enrollment.Id, x.Class.ClassId, x.Class.ClassCode,
+                x.Class.StartDate, x.Class.EndDate, x.Enrollment.Status, x.Enrollment.EnrolledAt, x.Enrollment.TuitionFee,
+                x.Enrollment.Status == "Active" && x.Enrollment.IsActive)).ToListAsync(ct);
+        return new(items, total, page, size);
+    }
 
     public Task<Registration?> FindAsync(Guid classId, Guid studentId, CancellationToken ct) =>
         db.Enrollments.AsNoTracking().SingleOrDefaultAsync(x => x.ClassId == classId && x.StudentId == studentId, ct);
