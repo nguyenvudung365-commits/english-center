@@ -16,8 +16,18 @@ const readState = vi.hoisted(() => ({
             enrolledAtUtc: "2026-11-01T02:30:00Z",
             tuitionFee: 4500000,
             isActive: false,
+        }, {
+            id: "00000000-0000-0000-0000-000000000001",
+            classId: "00000000-0000-0000-0000-000000000002",
+            classCode: "IELTS-02",
+            startDate: "2026-11-01",
+            endDate: "2026-12-31",
+            status: "Active",
+            enrolledAtUtc: "2026-11-01T02:30:00Z",
+            tuitionFee: 4500000,
+            isActive: true,
         }],
-        total: 1,
+        total: 2,
         page: 1,
         pageSize: 20,
     },
@@ -44,6 +54,10 @@ it("opens the student's enrollment route with history and coursework access stat
     expect(html).toContain("IELTS-01");
     expect(html).toContain("Đang ghi danh");
     expect(html).toContain("Đã ngừng");
+    const [inactive, active] = readState.data.items;
+    expect(html).not.toContain(`href="/classes/${inactive.classId}"`);
+    expect(html).toContain(`href="/classes/${active.classId}"`);
+    expect(html).toContain(`>${active.classCode}</a>`);
     expect(html).toContain('href="/invoices"');
     expect(html).toContain("Phân trang ghi danh");
     expect(html).not.toContain("Cấp quyền học tập");
